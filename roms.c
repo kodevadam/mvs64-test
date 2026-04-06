@@ -47,8 +47,19 @@ static unsigned int crom_num_tiles;
 static unsigned int srom_num_tiles;
 
 static void rom_cache_init(void) {
-	sprite_cache_init(&srom_cache, 4*8, 256);
-	sprite_cache_init(&crom_cache, 8*16, 1280);
+	// Scale sprite cache sizes based on available RDRAM.
+	// With the Expansion Pak (8 MB), we can afford larger caches which
+	// dramatically reduce cartridge DMA loads per frame.
+#ifdef N64
+	int have_exp = (get_memory_size() >= 8*1024*1024);
+	int srom_max = have_exp ? 512  : 256;
+	int crom_max = have_exp ? 2560 : 1280;
+#else
+	int srom_max = 256;
+	int crom_max = 1280;
+#endif
+	sprite_cache_init(&srom_cache, 4*8,  srom_max);
+	sprite_cache_init(&crom_cache, 8*16, crom_max);
 }
 
 uint8_t* srom_get_sprite(int spritenum) {
@@ -63,7 +74,7 @@ uint8_t* srom_get_sprite(int spritenum) {
 	profile_dma_load -= TICKS_READ();
 	dfs_seek(srom_file, spritenum*4*8, SEEK_SET);
 	dfs_read(pix, 1, 4*8, srom_file);
-	data_cache_hit_writeback_invalidate(pix, 4*8);    // FIXME: should not be required
+	data_cache_hit_invalidate(pix, 4*8);
 	profile_dma_load += TICKS_READ();
 	#else
 	fseek(srom_file, spritenum*4*8, SEEK_SET);
@@ -87,7 +98,7 @@ uint8_t* crom_get_sprite(int spritenum) {
 	profile_dma_load -= TICKS_READ();
 	dfs_seek(crom_file, spritenum*8*16, SEEK_SET);
 	dfs_read(pix, 1, 8*16, crom_file);
-	data_cache_hit_writeback_invalidate(pix, 8*16);  // FIXME: should not be required
+	data_cache_hit_invalidate(pix, 8*16);
 	profile_dma_load += TICKS_READ();
 	#else
 	fseek(crom_file, spritenum*8*16, SEEK_SET);
@@ -407,7 +418,6 @@ void rom_load(const char *dir) {
 		rom_pc_idle_skip = ini_get_integer(ini, "idle_skip", &ok);
 		if (ok) debugf("[ROM] configure idle_skip: %x\n", rom_pc_idle_skip);
 	}
-	rom_pc_idle_skip = 0;
 
 	#ifdef N64
 	dir = "";

@@ -67,7 +67,7 @@ static void render_fix(void) {
 		fix += 2; // skip two lines
 		for (int j=0;j<28;j++) {
 			uint16_t v = *fix++;
-			if (v)
+			if (likely(v))
 				draw_sprite_fix(v & 0xFFF, (v >> 12) & 0xF, i*8, j*8);
 		}
 		fix += 2;
@@ -106,7 +106,15 @@ static void render_sprites(void) {
 		sw = ((zc>>8)&0xF) + 1;
 
 		if (sh == 0) continue;
+		// Skip sprites entirely outside the horizontal visible range.
 		if (sx >= 320 && sx+sw <= 512) continue;
+		// Skip sprites whose vertical extent is entirely outside [0, 224].
+		// sy is in [0..511] wrapping space; convert: values >= 512-16 become negative.
+		{
+			int syt = sy >= 512-16 ? (int)sy - 512 : (int)sy;
+			if (syt >= 224) continue;
+			if (syt + (int)sh <= 0) continue;
+		}
 
 		// debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x zc:%04x pos:%d,%d sh:%d chain:%d repeat:%d tmap:%04x:%04x\n", snum, xc, yc, zc, sx, sy, sh, (yc & 0x40), repeat_tiles, tmap[0], tmap[1]);
 

@@ -552,11 +552,20 @@ mvs64_asm_io_read8:
 	li k0, 0
 	beq k1, 0x2FFFEF, asm_pbrom_bankno_r8
 	blt k1, 0x300000, asm_pbrom_r
+	beq k1, 0x300000, asm_input_p1cnt_r      # P1 controller
+	beq k1, 0x300001, asm_dipsw_r            # DIP switches (constant)
+	beq k1, 0x380000, asm_input_status_b_r   # Status B (start/select)
 	j tlbcallhandler_standard
 
 mvs64_asm_io_read16:
 	li k0, 1
 	blt k1, 0x300000, asm_pbrom_r
+	beq k1, 0x3C0002, asm_lspc_vram_data_r   # VRAM data (primary address)
+	beq k1, 0x3C0008, asm_lspc_vram_data_r   # VRAM data (mirror)
+	beq k1, 0x3C000A, asm_lspc_vram_data_r   # VRAM data (mirror)
+	beq k1, 0x3C0000, asm_lspc_vram_data_r   # VRAM data (mirror)
+	beq k1, 0x3C0004, asm_lspc_vram_modulo_r # VRAM modulo
+	beq k1, 0x3C000C, asm_lspc_vram_modulo_r # VRAM modulo (mirror)
 	j tlbcallhandler_standard
 
 mvs64_asm_io_write:
@@ -568,6 +577,79 @@ mvs64_asm_io_write:
 	bge k1, 0x400000, asm_video_palette_w
 	j tlbcallhandler_standard
 
+# -----------------------------------------------------------------------
+# Fast-path read handlers (8-bit)
+# -----------------------------------------------------------------------
+
+# 0x300000: Player-1 controller register.
+# Reconstructs the active-low byte directly from the keystate[] array,
+# avoiding the full C context switch.
+# keystate indices: UP=1 DOWN=2 LEFT=3 RIGHT=4 A=5 B=6 C=7 D=8
+asm_input_p1cnt_r:
+	la k0, keystate
+	lbu t6, 1(k0)   # UP    -> bit 0
+	lbu k1, 2(k0)   # DOWN  -> bit 1
+	sll k1, 1
+	or  t6, k1
+	lbu k1, 3(k0)   # LEFT  -> bit 2
+	sll k1, 2
+	or  t6, k1
+	lbu k1, 4(k0)   # RIGHT -> bit 3
+	sll k1, 3
+	or  t6, k1
+	lbu k1, 5(k0)   # A     -> bit 4
+	sll k1, 4
+	or  t6, k1
+	lbu k1, 6(k0)   # B     -> bit 5
+	sll k1, 5
+	or  t6, k1
+	lbu k1, 7(k0)   # C     -> bit 6
+	sll k1, 6
+	or  t6, k1
+	lbu k1, 8(k0)   # D     -> bit 7
+	sll k1, 7
+	or  t6, k1
+	not t6, t6      # NeoGeo controller register is active-low
+	andi t6, 0xFF
+	jr ra
+
+# 0x300001: DIP switch register.  Always returns 0xFF ^ DIPSW_FREEPLAY (0x40).
+asm_dipsw_r:
+	li t6, 0xFF ^ 0x40   # = 0xBF
+	jr ra
+
+# 0x380000: Status-B register (start, select, memory-card, MVS flags).
+# keystate indices: P1_START=9, P1_SELECT=10
+asm_input_status_b_r:
+	la k0, keystate
+	lbu t6, 9(k0)    # P1_START  -> bit 0
+	lbu k1, 10(k0)   # P1_SELECT -> bit 1
+	sll k1, 1
+	or  t6, k1
+	not t6, t6
+	andi t6, 0x03    # active-low lower 2 bits
+	ori  t6, 0xE0    # bits 5,6,7 always set (no mem-card, mem-card WP, MVS mode)
+	jr ra
+
+# -----------------------------------------------------------------------
+# Fast-path read handlers (16-bit)
+# -----------------------------------------------------------------------
+
+# 0x3C0002 / 0x3C0008 / 0x3C000A / 0x3C0000: LSPC VRAM data read.
+asm_lspc_vram_data_r:
+	lhu k0, %gprel(reg_vram_addr)(gp)
+	lw  k1, %gprel(reg_vram_bank)(gp)
+	sll k0, 1          # convert uint16_t index to byte offset
+	addu k1, k0
+	lhu t6, 0(k1)
+	jr ra
+
+# 0x3C0004 / 0x3C000C: LSPC VRAM modulo read.
+asm_lspc_vram_modulo_r:
+	lhu t6, %gprel(reg_vram_mod)(gp)
+	jr ra
+
+# -----------------------------------------------------------------------
 asm_watchdog_w:
 	li k0, 1
 	sb k0, %gprel(watchdog_kicked)(gp)

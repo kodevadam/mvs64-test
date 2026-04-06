@@ -29,10 +29,13 @@ static void rsp_sprite_begin(uint16_t *palette_ram) {
 
 static bool rdp_mode_copy = false;
 static int rdp_tex_slot = 0;
-static int rdp_pal_slot = 0;
 static int fix_last_spritnum = 0;
 static int fix_last_palnum = -1;
 static int pal_slot_cache[16];
+// LRU tracking: each slot stores the frame-level "age" when it was last used.
+// On a cache miss we evict the slot with the smallest age (least recently used).
+static int pal_slot_age[16];
+static int pal_age_counter = 0;
 
 static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int sh, bool flipx, bool flipy) {
 	uint8_t *src = crom_get_sprite(spritenum);
@@ -56,16 +59,18 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 			break;
 	}
 	if (pal_slot == 16) {
-		// Load the palette.
+		// Cache miss: evict the least-recently-used palette slot.
+		int lru = 0;
+		for (int i = 1; i < 16; i++)
+			if (pal_slot_age[i] < pal_slot_age[lru]) lru = i;
+		pal_slot = lru;
+
 		data_cache_hit_writeback_invalidate(pal, 16*2);
-
-		// Select slot to reuse (TODO: should be LRU or random)
-		pal_slot = rdp_pal_slot++;
-		if (rdp_pal_slot == 16) rdp_pal_slot = 0;
-
 		rdpq_tex_load_tlut(pal, pal_slot*16, 16);
 		pal_slot_cache[pal_slot] = palnum;
 	}
+	// Update age so this slot is considered most-recently-used.
+	pal_slot_age[pal_slot] = ++pal_age_counter;
 
 	const int pitch = 8;
 	const int tmem_addr = rdp_tex_slot * 16 * 8;
@@ -143,8 +148,8 @@ static void render_begin_sprites(void) {
 	rdpq_mode_tlut(TLUT_RGBA16);
 
 	rdp_mode_copy = true;
-	rdp_pal_slot = 0;
-	for (int i=0;i<16;i++) pal_slot_cache[i] = -1;
+	pal_age_counter = 0;
+	for (int i=0;i<16;i++) { pal_slot_cache[i] = -1; pal_slot_age[i] = 0; }
 }
 
 static void render_end_sprites(void) {

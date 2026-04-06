@@ -19,6 +19,7 @@ RSPQ_BeginSavedState
 PALETTE_CACHE: .half -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
 LAST_PALETTE:  .long 0
 RDRAM_PALETTE: .long 0
+PAL_SLOT_NEXT: .byte 0    # round-robin eviction counter for sprite palette slots
 RSPQ_EndSavedState
 
 .macro vsll_acc vdstreg, vsrcreg, qty
@@ -409,13 +410,16 @@ SCALE_FACTORS:
     ################################
     .func cmd_sprite_begin
 cmd_sprite_begin:
-    # Initialize palette cache entries to -1
+    # Initialize palette cache entries to -1 (nothing cached)
     li t0, 0xFFFF
     mtc2 t0, $v01.e0
     vor $v01, vzero, $v01.e0
     li s0, %lo(PALETTE_CACHE)
     sqv $v01, 0,s0
     sqv $v01, 16,s0
+
+    # Reset round-robin eviction counter
+    sb zero, %lo(PAL_SLOT_NEXT)
 
     jr ra
     sw a0, %lo(RDRAM_PALETTE)
@@ -491,10 +495,12 @@ cmd_sprite_draw:
     bnez palslot, sprite_draw
     addi palslot, -1
 
-    # Palette not found, we need to load it.
-    # Calculate a palette slot to use. For now, just infer it from the palette
-    # number. We should probably do a LRU-like, but for now this is enough.
-    andi palslot, palettenum, 0xF
+    # Palette not found: pick next slot in round-robin order so that two
+    # palettes whose numbers share the same low 4 bits don't fight each other.
+    lbu palslot, %lo(PAL_SLOT_NEXT)
+    addiu t0, palslot, 1
+    andi t0, 0xF
+    sb t0, %lo(PAL_SLOT_NEXT)
 
     li s0, %lo(RDP_SPRITE_LOAD_PALETTE)
     lqv vload0,  0,s0
@@ -507,7 +513,7 @@ cmd_sprite_draw:
 
     # Calculate palette address in RDRAM, and store it into the SetTexImage command
     lw t0, %lo(RDRAM_PALETTE)
-    sll palettenum, 5
+    sll palettenum, 5           # palettenum is now original_palettenum * 32
     add t0, palettenum
     lw t1, 3*8+4(s3)
     or t1, t0
@@ -518,6 +524,15 @@ cmd_sprite_draw:
     lh t1, 34(s3)
     or t1, t0
     sh t1, 34(s3)
+
+    # Update PALETTE_CACHE[palslot] = original_palettenum so future sprites
+    # with the same palette get a cache hit and skip the load entirely.
+    # palettenum was shifted left by 5 above; shift back to recover original.
+    srl t0, palettenum, 5
+    li s0, %lo(PALETTE_CACHE)
+    sll t1, palslot, 1          # byte offset into half-word array
+    addu s0, t1
+    sh t0, 0(s0)
 
     # Go past the palette load commands
     addi s3, 48
