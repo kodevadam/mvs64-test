@@ -222,7 +222,7 @@ uint8_t *pbrom_last_mem = NULL;
 void pbrom_init(const char *fn) {
 	unsigned len;
 	#ifdef N64
-	if (pbrom_file < 0) dfs_close(pbrom_file);
+	if (pbrom_file >= 0) dfs_close(pbrom_file);
 	pbrom_file = dfs_open(fn);
 	if (pbrom_file < 0) {
 		debugf("[PBROM] no PBROM detected\n");
