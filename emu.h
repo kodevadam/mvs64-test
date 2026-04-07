@@ -5,7 +5,7 @@
 //   0 - never frameskip, game might slowdown
 //   1 - 30 FPS mode (draw one frame every two)
 //   2 - auto mode. Game will frameskip as much as necessary to keep up with 60 FPS
-#define CONFIG_FRAMESKIP_MODE            0
+#define CONFIG_FRAMESKIP_MODE            1
 
 #include <stdint.h>
 #include <stdbool.h>

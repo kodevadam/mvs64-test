@@ -552,11 +552,20 @@ mvs64_asm_io_read8:
 	li k0, 0
 	beq k1, 0x2FFFEF, asm_pbrom_bankno_r8
 	blt k1, 0x300000, asm_pbrom_r
+	beq k1, 0x300000, asm_input_p1cnt_r      # P1 controller
+	beq k1, 0x300001, asm_dipsw_r            # DIP switches (constant)
+	beq k1, 0x380000, asm_input_status_b_r   # Status B (start/select)
 	j tlbcallhandler_standard
 
 mvs64_asm_io_read16:
 	li k0, 1
 	blt k1, 0x300000, asm_pbrom_r
+	beq k1, 0x3C0002, asm_lspc_vram_data_r   # VRAM data (primary address)
+	beq k1, 0x3C0008, asm_lspc_vram_data_r   # VRAM data (mirror)
+	beq k1, 0x3C000A, asm_lspc_vram_data_r   # VRAM data (mirror)
+	beq k1, 0x3C0000, asm_lspc_vram_data_r   # VRAM data (mirror)
+	beq k1, 0x3C0004, asm_lspc_vram_modulo_r # VRAM modulo
+	beq k1, 0x3C000C, asm_lspc_vram_modulo_r # VRAM modulo (mirror)
 	j tlbcallhandler_standard
 
 mvs64_asm_io_write:
