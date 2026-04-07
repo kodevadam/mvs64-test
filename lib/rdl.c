@@ -86,11 +86,12 @@ RdpDisplayList *rdl_sprite(RdpDisplayList *rdl, sprite_t *s, int sx, int sy, boo
     int ntx = (width + SPRITE_BLOCK_W - 1) / SPRITE_BLOCK_W;
     int nty = (height + SPRITE_BLOCK_H - 1) / SPRITE_BLOCK_H;
 
+    int bitdepth = TEX_FORMAT_BITDEPTH(sprite_get_format(s)) / 8;
     int tf, dsdx, dsdy;
-    switch (s->bitdepth) {
+    switch (bitdepth) {
     case 2: tf = RDP_TILE_SIZE_16BIT; break;
     case 4: tf = RDP_TILE_SIZE_32BIT; break;
-    default: assertf(0, "unsupported bitdepth: %d", s->bitdepth); abort();
+    default: assertf(0, "unsupported bitdepth: %d", bitdepth); abort();
     }
 
     int nprims = 6 + ntx*nty*4;
@@ -102,7 +103,7 @@ RdpDisplayList *rdl_sprite(RdpDisplayList *rdl, sprite_t *s, int sx, int sy, boo
     rdl_push(rdl, InternalSpriteHeader(width, height));
     rdl_push(rdl, RdpSetOtherModes(SOM_CYCLE_COPY | (transparent ? SOM_ALPHA_COMPARE : 0)));
     rdl_push(rdl, RdpSetTexImage(RDP_TILE_FORMAT_RGBA, tf, (uint32_t)s->data, s->width));
-    rdl_push(rdl, RdpSetTile(RDP_TILE_FORMAT_RGBA, tf, SPRITE_BLOCK_W*s->bitdepth/8, 0, 0));
+    rdl_push(rdl, RdpSetTile(RDP_TILE_FORMAT_RGBA, tf, SPRITE_BLOCK_W*bitdepth/8, 0, 0));
     rdl_push(rdl, RdpSetBlendColor(0x0001)); // alpha threshold value
     dsdx = 4<<10; dsdy = 1<<10;
 

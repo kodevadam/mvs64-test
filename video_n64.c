@@ -63,7 +63,7 @@ static void draw_sprite(int spritenum, int palnum, int x0, int y0, int sw, int s
 		pal_slot = rdp_pal_slot++;
 		if (rdp_pal_slot == 16) rdp_pal_slot = 0;
 
-		rdpq_tex_load_tlut(pal, pal_slot*16, 16);
+		rdpq_tex_upload_tlut(pal, pal_slot*16, 16);
 		pal_slot_cache[pal_slot] = palnum;
 	}
 
@@ -200,7 +200,7 @@ static void render_begin_fix(void) {
 
 	// Load all 16 palettes right away. They fit TMEM, so that we don't need
 	// to load them while we process
-	rdpq_tex_load_tlut(PALETTE_RAM_EMU, 0, 256);
+	rdpq_tex_upload_tlut(PALETTE_RAM_EMU, 0, 256);
 
 	// Configure tiles once
 	rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, 0);  // used for drawing

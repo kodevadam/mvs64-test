@@ -26,7 +26,7 @@ void plat_init(int audiofreq, int fps) {
     char *heap_end = &end;
     debugf("heap [%p - %p = %d]\n", heap_top, heap_end, heap_top-heap_end);
 
-	controller_init();
+	joypad_init();
     // NOTE: there seems to be a bug in libdragon display library when ANTIALIAS_OFF
     // is used. Some RDP register is not configured correctly and the display is
     // corrupted on NTSC consoles.
@@ -40,20 +40,20 @@ void plat_init(int audiofreq, int fps) {
 }
 
 int plat_poll(void) {
-	controller_scan();
-    struct controller_data ckeys = get_keys_pressed();
+	joypad_poll();
+    joypad_inputs_t ckeys = joypad_get_inputs(JOYPAD_PORT_1);
 
     memset(keystate, 0, sizeof(keystate));
 
-    if (ckeys.c[0].up)      { keystate[PLAT_KEY_P1_UP] = 1; }
-    if (ckeys.c[0].down)    { keystate[PLAT_KEY_P1_DOWN] = 1; }
-    if (ckeys.c[0].left)    { keystate[PLAT_KEY_P1_LEFT] = 1; }
-    if (ckeys.c[0].right)   { keystate[PLAT_KEY_P1_RIGHT] = 1; }
-    if (ckeys.c[0].A)       { keystate[PLAT_KEY_P1_A] = 1; }
-    if (ckeys.c[0].B)       { keystate[PLAT_KEY_P1_B] = 1; }
-    if (ckeys.c[0].C_down)  { keystate[PLAT_KEY_P1_C] = 1; }
-    if (ckeys.c[0].C_right) { keystate[PLAT_KEY_P1_D] = 1; }
-    if (ckeys.c[0].start)   { keystate[PLAT_KEY_P1_START] = 1; }
+    if (ckeys.btn.d_up)     { keystate[PLAT_KEY_P1_UP] = 1; }
+    if (ckeys.btn.d_down)   { keystate[PLAT_KEY_P1_DOWN] = 1; }
+    if (ckeys.btn.d_left)   { keystate[PLAT_KEY_P1_LEFT] = 1; }
+    if (ckeys.btn.d_right)  { keystate[PLAT_KEY_P1_RIGHT] = 1; }
+    if (ckeys.btn.a)        { keystate[PLAT_KEY_P1_A] = 1; }
+    if (ckeys.btn.b)        { keystate[PLAT_KEY_P1_B] = 1; }
+    if (ckeys.btn.c_down)   { keystate[PLAT_KEY_P1_C] = 1; }
+    if (ckeys.btn.c_right)  { keystate[PLAT_KEY_P1_D] = 1; }
+    if (ckeys.btn.start)    { keystate[PLAT_KEY_P1_START] = 1; }
 
     return 1;
 }
