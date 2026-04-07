@@ -118,7 +118,12 @@ uint8_t* sprite_cache_insert(SpriteCache *c, uint32_t key) {
 	if (c->num_sprites == c->max_sprites) {
 		LOG("[CACHE] cache full (%d/%d)\n", c->num_sprites, c->max_sprites);
 		do {
-			assert(c->tick_cutoff < c->cur_tick);
+			if (c->tick_cutoff >= c->cur_tick) {
+				// LRU eviction exhausted: all entries are from the current tick.
+				// Force a full cache reset so we can keep going.
+				sprite_cache_reset(c);
+				break;
+			}
 			c->tick_cutoff++;
 			sprite_cache_pop(c);
 		} while (c->num_sprites == c->max_sprites);
