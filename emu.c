@@ -69,14 +69,10 @@ static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
 	if (clock > m68k_clock) {
 		#ifdef N64
-		// Idle-skip: if the 68K is spinning at the configured idle-skip PC,
-		// fast-forward the clock instead of emulating the busy-wait cycle by cycle.
-		if (rom_pc_idle_skip && m64k_get_pc(&m64k) == rom_pc_idle_skip)
-			m68k_clock = clock;
-		else
-			m68k_clock = m64k_run(&m64k, clock);
+		debugf("m68k_exec: %d\n", (int)(clock - m68k_clock));
+		m68k_clock = m64k_run(&m64k, clock);
 		#else
-		m68k_clock += m68k_execute(clock - m68k_clock);
+		m68k_clock += m68k_execute(clock - m68k_clock);	
 		#endif
 	}
 	return m68k_clock * M68K_CLOCK_DIV;
@@ -166,6 +162,7 @@ int cpu_irqack(void *ctx, int level)
 uint32_t emu_vblank_start(void* arg) {
 	emu_cpu_irq(1, true);
 	hw_vblank();
+	debugf("[EMU] VBlank - clock:%lld clock_frame:%lld\n", emu_clock(), emu_clock_frame());
 	return FRAME_CLOCK;
 }
 
@@ -201,6 +198,7 @@ uint32_t emu_render(void *arg) {
 		}
 	}
 
+	debugf("[RENDER] render\n");
 	#ifdef N64
 	uint32_t t0 = TICKS_READ();
 	#endif
@@ -238,6 +236,8 @@ void emu_run_frame(void) {
     while (g_clock < vsync)
     	g_clock = m68k_exec(vsync);
 
+    // Frame completed
+	debugf("[EMU] Frame completed: %d (vsync: %llu)\n", g_frame, vsync);
     g_frame++;
 	g_clock_framebegin += FRAME_CLOCK;
 }
