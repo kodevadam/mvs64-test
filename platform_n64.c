@@ -33,7 +33,7 @@ void plat_init(int audiofreq, int fps) {
 	display_init(RESOLUTION_320x240, DEPTH_16_BPP, 2, GAMMA_NONE, ANTIALIAS_RESAMPLE);
     dfs_init(DFS_DEFAULT_LOCATION);
     rdpq_init();
-    rdpq_debug_start();
+    // rdpq_debug_start();  // Too slow for real-time; enable selectively
 
     // Register our custom RSP overlay into the RSP queue engine
     RSP_OVL_ID = rspq_overlay_register(&rsp_video);

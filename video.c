@@ -67,8 +67,10 @@ static void render_fix(void) {
 		fix += 2; // skip two lines
 		for (int j=0;j<28;j++) {
 			uint16_t v = *fix++;
-			if (v)
+			if (v) {
 				draw_sprite_fix(v & 0xFFF, (v >> 12) & 0xF, i*8, j*8);
+				video_drawn_fix++;
+			}
 		}
 		fix += 2;
 	}
@@ -183,6 +185,7 @@ static void render_sprites(void) {
 
 						// Draw the tile
 						draw_sprite(tnum, palnum, sx, ssy, sw, ssh, tc&1, tc&2);
+						video_drawn_sprites++;
 					}
 				}
 
@@ -202,11 +205,19 @@ static void render_sprites(void) {
 
 
 
+static int video_drawn_sprites = 0;
+static int video_drawn_fix = 0;
+
 void video_render(void) {
+	video_drawn_sprites = 0;
+	video_drawn_fix = 0;
 	render_begin();
 	render_sprites();
 	render_fix();
 	render_end();
+	debugf("[VIDEO] sprites:%d fix:%d pal_bank:%d bkg:%04x\n",
+		video_drawn_sprites, video_drawn_fix,
+		PALETTE_RAM_BANK, PALETTE_RAM[PALETTE_RAM_BANK+0xFFF]);
 }
 
 void video_palette_w(uint32_t address, uint32_t val, int sz) {
