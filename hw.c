@@ -285,6 +285,41 @@ void hw_init(void) {
 	watchdog_init();
 }
 
+/* Update the fetch pointer for fast instruction reads.
+ * Maps 68K PC regions to direct host memory pointers so that
+ * m68ki_read_imm_16 can bypass the bank lookup entirely. */
+void m68k_update_fetch_ptr(unsigned int pc) {
+	extern m68ki_cpu_core m68ki_cpu;
+	unsigned int region = (pc >> 20) & 0xF;
+
+	/* fetch_region is initialized to 0xFF (invalid) at startup to force
+	 * the first call to always recalculate. */
+
+	/* Only recalculate if we changed regions */
+	if (region == m68ki_cpu.fetch_region)
+		return;
+	m68ki_cpu.fetch_region = region;
+
+	switch (region) {
+	case 0x0:
+		/* P-ROM: 0x000000-0x0FFFFF, 1MB */
+		m68ki_cpu.fetch_ptr = (uint16*)P_ROM;
+		break;
+	case 0x1:
+		/* WORK_RAM: 0x100000-0x10FFFF, 64KB (mirrored) */
+		m68ki_cpu.fetch_ptr = (uint16*)(WORK_RAM - 0x100000);
+		break;
+	case 0xC:
+		/* BIOS: 0xC00000-0xC1FFFF, 128KB */
+		m68ki_cpu.fetch_ptr = (uint16*)(BIOS - 0xC00000);
+		break;
+	default:
+		/* Unknown region or HWIO — use slow path */
+		m68ki_cpu.fetch_ptr = NULL;
+		break;
+	}
+}
+
 void hw_vblank(void) {
 	lspc_vblank();
 	watchdog_vblank();

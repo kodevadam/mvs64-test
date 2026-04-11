@@ -88,4 +88,10 @@ static inline bool m68k_check_idle_skip(unsigned int address) {
 	return address == rom_pc_idle_skip;
 }
 
+/* Update the fast fetch pointer when PC changes to a new memory region.
+ * The fetch pointer allows m68ki_read_imm_16 to read instructions via
+ * a direct host pointer dereference instead of going through the bank
+ * lookup + inline fast path on every instruction fetch. */
+void m68k_update_fetch_ptr(unsigned int pc);
+
 #endif

@@ -219,6 +219,10 @@ int main(int argc, char *argv[]) {
 	#endif
 
 	m68k_init();
+	{
+		extern m68ki_cpu_core m68ki_cpu;
+		m68ki_cpu.fetch_region = 0xFF; /* force first m68k_update_fetch_ptr to recalculate */
+	}
 
 	hw_init();
 	g_clock = 0;

@@ -155,8 +155,8 @@
  * large value.  This allows host programs to be nicer when it comes to
  * fetching immediate data and instructions on a banked memory system.
  */
-#define M68K_MONITOR_PC             OPT_OFF
-#define M68K_SET_PC_CALLBACK(A)     your_pc_changed_handler_function(A)
+#define M68K_MONITOR_PC             OPT_SPECIFY_HANDLER
+#define M68K_SET_PC_CALLBACK(A)     m68k_update_fetch_ptr(A)
 
 
 /* If ON, CPU will call the instruction hook callback before every
