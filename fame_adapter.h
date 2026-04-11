@@ -7,6 +7,7 @@
 void     fame_adapter_init(void);
 void     fame_adapter_reset(void);
 int      fame_adapter_execute(int cycles);
+int      fame_adapter_cycles_run(void);
 void     fame_adapter_set_virq(int level, int active);
 uint32_t fame_adapter_get_pc(void);
 void     fame_adapter_end_timeslice(void);

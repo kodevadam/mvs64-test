@@ -113,7 +113,7 @@ void emu_change_event(int event_id, int64_t newclock) {
 
 int64_t emu_clock(void) {
 	#ifdef USE_FAME
-	return g_clock; /* FAME tracks cycles via execute return value */
+	return g_clock + fame_adapter_cycles_run() * M68K_CLOCK_DIV;
 	#else
 	return g_clock + m68k_cycles_run() * M68K_CLOCK_DIV;
 	#endif

@@ -17,6 +17,9 @@
 /* The global FAME CPU context */
 M68K_CONTEXT fame_ctx;
 
+/* Track the initial timeslice for mid-execution clock calculation */
+static int fame_initial_cycles;
+
 /* Forward declarations for NeoGeo HWIO handlers (defined in hw.c) */
 extern uint32_t read_hwio(uint32_t addr, int sz);
 extern void write_hwio(uint32_t addr, uint32_t val, int sz);
@@ -205,7 +208,16 @@ void fame_adapter_reset(void) {
  * Returns the actual number of cycles consumed.
  */
 int fame_adapter_execute(int cycles) {
+    fame_initial_cycles = cycles;
     return fm68k_emulate(&fame_ctx, cycles, fm68k_reason_emulate);
+}
+
+/*
+ * Get cycles consumed so far in the current timeslice.
+ * FAME's io_cycle_counter counts DOWN from the initial value.
+ */
+int fame_adapter_cycles_run(void) {
+    return fame_initial_cycles - fame_ctx.io_cycle_counter;
 }
 
 /*
