@@ -242,15 +242,6 @@ uint32_t fame_adapter_get_pc(void) {
     return fm68k_get_pc(&fame_ctx) & 0xFFFFFF;
 }
 
-/*
- * Get the number of cycles consumed so far in the current timeslice.
- */
-int fame_adapter_cycles_run(void) {
-    /* During execution, io_cycle_counter counts down from the timeslice.
-     * cycles_run = initial - remaining. But we don't track initial here;
-     * the caller in emu.c handles this via the return value of execute(). */
-    return 0; /* Not needed if emu.c tracks via execute return value */
-}
 
 /*
  * End the current timeslice early (for event rescheduling).
