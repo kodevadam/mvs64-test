@@ -162,34 +162,32 @@ uint32_t emu_render(void *arg) {
 	if (CONFIG_FRAMESKIP_MODE == 2) {
 		extern volatile int N64_FRAME;
 
-		/* Adaptive frameskip: render when keeping up, skip when behind.
-		 * Skip at least 1 frame between renders for CPU headroom.
-		 * When behind real-time, skip up to 5 consecutive frames.
-		 * This keeps the game running at correct speed while rendering
-		 * as many frames as the CPU budget allows. */
+		/* Adaptive frameskip: baseline 1-in-3 (like fixed mode), but
+		 * render extra frames when the CPU is keeping up with real-time.
+		 * Never skip MORE than 2 consecutive frames — heavy scenes stay
+		 * at a steady 20 FPS floor rather than dropping to 10-12 FPS. */
 		static int skip_count = 0;
 
-		if (skip_count < 1) {
-			/* Always skip at least 1 frame between renders */
-			skip_count++;
-			return FRAME_CLOCK;
-		}
-
-		if (N64_FRAME > g_frame) {
-			/* Behind real-time: skip rendering to catch up */
-			if (skip_count < 5) {
+		if (skip_count < 2) {
+			/* Baseline: always skip at least 2 frames (render 1 in 3).
+			 * But if we're ahead of real-time, render early. */
+			if (skip_count >= 1 && N64_FRAME <= g_frame) {
+				/* Ahead of real-time: render this frame (1 in 2) */
+				skip_count = 0;
+			} else {
 				skip_count++;
 				return FRAME_CLOCK;
 			}
-			/* Hit max skip — render anyway and resync to avoid
-			 * the game becoming invisible during heavy scenes */
+		} else {
+			skip_count = 0;
+		}
+
+		/* Resync if we've fallen behind */
+		if (N64_FRAME > g_frame + 1) {
 			disable_interrupts();
 			N64_FRAME = g_frame;
 			enable_interrupts();
 		}
-
-		/* Render this frame */
-		skip_count = 0;
 	}
 	#endif
 
