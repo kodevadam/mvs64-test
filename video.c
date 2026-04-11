@@ -108,6 +108,9 @@ static void render_sprites(void) {
 
 		if (sh == 0) continue;
 		if (sx >= 320 && sx+sw <= 512) continue;
+		// Sprite-level Y cull: skip if entirely below the visible area (0..223)
+		// and not wrapping past 512. Saves iterating all tiles for nothing.
+		if (sy >= 224 && (sy + sh) <= 512) continue;
 
 		// debugf("[VIDEO] sprite snum:%d xc:%04x yc:%04x zc:%04x pos:%d,%d sh:%d chain:%d repeat:%d tmap:%04x:%04x\n", snum, xc, yc, zc, sx, sy, sh, (yc & 0x40), repeat_tiles, tmap[0], tmap[1]);
 
