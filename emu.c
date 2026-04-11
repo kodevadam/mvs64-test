@@ -162,6 +162,10 @@ int cpu_irqack(void *ctx, int level)
 uint32_t emu_vblank_start(void* arg) {
 	emu_cpu_irq(1, true);
 	hw_vblank();
+	// HACK: Force game-ready bit every VBlank so game's VBlank handler runs
+	#ifdef N64
+	*(volatile uint8_t*)(0xFF10FD80ul) |= 0x80;
+	#endif
 	debugf("[EMU] VBlank - clock:%lld clock_frame:%lld\n", emu_clock(), emu_clock_frame());
 	return FRAME_CLOCK;
 }
