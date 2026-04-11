@@ -305,6 +305,9 @@ int main(int argc, char *argv[]) {
 			uint32_t pc = m64k_get_pc(&m64k) & 0xFFFFFF;
 			if (!game_dumped && pc < 0xC00000 && g_frame > 100) {
 				game_dumped = true;
+				// HACK: Force "game ready" bit 7 in BIOS_USER_MODE.
+				// The game's init should set this but fails on this emulator.
+				*(uint8_t*)(0xFF10FD80ul) |= 0x80;
 				debugf("=== GAME CODE DUMP (PC=%06lx) ===\n", pc);
 				// Dump key WORK_RAM locations that control game state
 				debugf("=== KEY GAME STATE ===\n");
