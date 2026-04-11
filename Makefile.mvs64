@@ -17,10 +17,10 @@ obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_
 src_makerom = mvsmakerom.c miniz.c
 obj_makerom = $(src_makerom:%.c=$(BUILD_DIR)/%.o)
 
-CFLAGS += -Wno-unused-function
+CFLAGS += -Wno-unused-function -O3
 
-# Musashi's generated opcode file is huge; avoid expensive optimizations
-$(BUILD_DIR)/m68kops.o: CFLAGS += -O2 -fno-expensive-optimizations
+# Musashi's generated opcode file is huge; keep at -O2 to avoid long compile
+$(BUILD_DIR)/m68kops.o: CFLAGS += -O2
 
 ROMNAME=$(notdir $(basename $(ROM)))
 ROMDIR=$(ROM:%.zip=%.n64)

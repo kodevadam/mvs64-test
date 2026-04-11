@@ -139,10 +139,10 @@ uint32_t emu_render(void *arg) {
 		if (N64_FRAME > g_frame) {
 			skip++;
 			if (skip < MAX_SKIP) {
-				debugf("[RENDER] skip frame\n");
+				;
 				return FRAME_CLOCK;
 			}
-			debugf("[RENDER] max skip\n");
+			;
 			skip = 0;
 			disable_interrupts();
 			N64_FRAME = g_frame;
@@ -152,13 +152,12 @@ uint32_t emu_render(void *arg) {
 	#endif
 
 	if (CONFIG_FRAMESKIP_MODE == 1) {
-		if (g_frame & 1) {
-			debugf("[RENDER] skip frame\n");
+		if (g_frame % 3 != 0) {
+			;
 			return FRAME_CLOCK;
 		}
 	}
 
-	debugf("[RENDER] render\n");
 	#ifdef N64
 	uint32_t t0 = TICKS_READ();
 	#endif
