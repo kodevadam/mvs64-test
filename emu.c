@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <inttypes.h>
 #include "emu.h"
 #ifdef N64
 #include "m64k/m64k.h"
@@ -172,7 +173,7 @@ uint32_t emu_vblank_start(void* arg) {
 			*(volatile uint8_t*)(0xFF10FD80ul) |= 0x80;
 	}
 	#endif
-	debugf("[EMU] VBlank - clock:%lld clock_frame:%lld\n", emu_clock(), emu_clock_frame());
+	debugf("[EMU] VBlank - clock:%" PRId64 " clock_frame:%" PRId64 "\n", emu_clock(), emu_clock_frame());
 	return FRAME_CLOCK;
 }
 
