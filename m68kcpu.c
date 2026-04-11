@@ -989,16 +989,32 @@ int m68k_execute(int num_cycles)
 		//rasky: disable bus error for performance
 		//m68ki_check_bus_error_trap();
 
-		/* Main loop.  Keep going until we run out of clock cycles.
-		 * Cycle costs are embedded directly into each opcode handler
-		 * (via USE_CYCLES(N) at handler entry) to avoid the 64KB
-		 * CYC_INSTRUCTION table lookup that thrashes D-cache. */
-		do
+		/* Main loop using computed goto (threaded dispatch).
+		 * Instead of calling handler functions through pointers:
+		 *   handler_table[opcode]()  →  jalr + jr $ra
+		 * we jump directly to labeled handler blocks:
+		 *   goto *goto_table[opcode]  →  jr (no call/return overhead)
+		 * All handler code is inlined into this function via #include. */
 		{
-			REG_PPC = REG_PC;
-			REG_IR = m68ki_read_imm_16();
-			m68k_dispatch_l2[REG_IR >> 8][REG_IR & 0xFF]();
-		} while(GET_CYCLES() > 0);
+			/* The goto table and handler blocks are included here, inside
+			 * m68k_execute(), because GCC computed goto labels (&&label)
+			 * must be in the same function as the goto * dispatch. */
+			#include "m68k_goto_table.inc"
+
+			goto dispatch_next;
+
+			dispatch_next:
+				REG_PPC = REG_PC;
+				REG_IR = m68ki_read_imm_16();
+				if (__builtin_expect(GET_CYCLES() > 0, 1))
+					goto *m68k_goto_table[REG_IR];
+				goto dispatch_done;
+
+			/* All 1967 handler blocks as labeled code */
+			#include "m68k_handlers.inc"
+
+			dispatch_done: ;
+		}
 
 		/* set previous PC to current PC for the next entry into the loop */
 		REG_PPC = REG_PC;

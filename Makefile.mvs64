@@ -19,6 +19,8 @@ else
 src_68k = m68kcpu.c m68kops.c
 # Musashi's generated opcode file is huge; keep at -O2
 $(BUILD_DIR)/m68kops.o: CFLAGS += -O2
+# m68kcpu.c now includes all handler code via computed goto; needs reduced opt
+$(BUILD_DIR)/m68kcpu.o: CFLAGS += -O2 -fno-expensive-optimizations
 endif
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c $(src_68k) $(wildcard hle_*.c)
