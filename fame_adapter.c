@@ -190,8 +190,8 @@ void fame_adapter_init(void) {
  */
 void fame_adapter_reset(void) {
     fm68k_reset(&fame_ctx);
-    debugf("[FAME] reset: PC=%06x SP=%08x SR=%04x\n",
-        fame_ctx.pc, fame_ctx.areg[7].D, fame_ctx.sr);
+    debugf("[FAME] reset: PC=%06lx SP=%08lx SR=%04x\n",
+        (unsigned long)fame_ctx.pc, (unsigned long)fame_ctx.areg[7].D, fame_ctx.sr);
     debugf("[FAME] Fetch[0x00]=%lx Fetch[0xC0]=%lx\n",
         (unsigned long)fame_ctx.Fetch[0x00],
         (unsigned long)fame_ctx.Fetch[0xC0]);
