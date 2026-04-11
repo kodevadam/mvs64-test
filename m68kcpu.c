@@ -968,12 +968,14 @@ int m68k_execute(int num_cycles)
 		//rasky: disable bus error for performance
 		//m68ki_check_bus_error_trap();
 
-		/* Main loop.  Keep going until we run out of clock cycles.
-		 * Optimized: removed REG_PPC store (only needed for address error
-		 * exceptions which are disabled), removed auto-disabled trace/FC/hook
-		 * macros, merged cycle lookup with dispatch. */
+		/* Main loop.  Keep going until we run out of clock cycles. */
 		do
 		{
+			/* REG_PPC must be set every instruction — it's used by TRAP,
+			 * CHK, TRAPV and other exception handlers to push the correct
+			 * return address onto the stack. NeoGeo games use TRAP #0
+			 * for BIOS syscalls extensively. */
+			REG_PPC = REG_PC;
 			REG_IR = m68ki_read_imm_16();
 			m68ki_instruction_jump_table[REG_IR]();
 			USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
