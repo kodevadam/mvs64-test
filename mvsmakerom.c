@@ -516,5 +516,4 @@ const char* game_ini[65536] = {
 	[GAME_AOF]      = "idle_skip=0x6790\n",
 	[GAME_AOF3]     = "idle_skip=0x15D2\n",
 	[GAME_PBOBBLEN] = "idle_skip=0xE76\n",
-	[GAME_BLAZSTAR] = "idle_skip=0x5CE0\n",
 };
