@@ -59,7 +59,6 @@ void cpu_start_trace(int cnt) {
 static int g_frame;
 #ifdef N64
 m64k_t m64k;
-bool game_dumped = false;
 #endif
 static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
@@ -164,16 +163,6 @@ int cpu_irqack(void *ctx, int level)
 uint32_t emu_vblank_start(void* arg) {
 	emu_cpu_irq(1, true);
 	hw_vblank();
-	// HACK: Force game-ready bit every VBlank so game's VBlank handler runs.
-	// Only after the game has started (game_dumped flag set by profiling code).
-	#ifdef N64
-	{
-		extern bool game_dumped;
-		if (game_dumped)
-			*(volatile uint8_t*)(0xFF10FD80ul) |= 0x80;
-	}
-	#endif
-	debugf("[EMU] VBlank - clock:%" PRId64 " clock_frame:%" PRId64 "\n", emu_clock(), emu_clock_frame());
 	return FRAME_CLOCK;
 }
 
@@ -307,60 +296,6 @@ int main(int argc, char *argv[]) {
 
 		#ifdef N64
 		uint32_t emu_time = TICKS_DISTANCE(t0, TICKS_READ());
-
-		// One-time dump of game code when PC transitions from BIOS to game ROM
-		{
-			; // game_dumped is file-scope
-			uint32_t pc = m64k_get_pc(&m64k) & 0xFFFFFF;
-			if (!game_dumped && pc < 0xC00000 && g_frame > 100) {
-				game_dumped = true;
-				// HACK: Force "game ready" bit 7 in BIOS_USER_MODE.
-				// The game's init should set this but fails on this emulator.
-				*(uint8_t*)(0xFF10FD80ul) |= 0x80;
-				debugf("=== GAME CODE DUMP (PC=%06lx) ===\n", pc);
-				// Dump key WORK_RAM locations that control game state
-				debugf("=== KEY GAME STATE ===\n");
-				debugf("  $1021BE (sync flag): %02x\n",
-					*(uint8_t*)(0xFF1021BEul));
-				debugf("  $10FD80 (game ready): %02x\n",
-					*(uint8_t*)(0xFF10FD80ul));
-				debugf("  $1080E6 (vblank flag): %02x\n",
-					*(uint8_t*)(0xFF1080E6ul));
-				debugf("  $1080E7 (vblank copy): %02x\n",
-					*(uint8_t*)(0xFF1080E7ul));
-				debugf("  $1080E8 (vbl counter): %04x\n",
-					*(uint16_t*)(0xFF1080E8ul));
-				debugf("  $1080EA (xfer count): %04x\n",
-					*(uint16_t*)(0xFF1080EAul));
-				debugf("  $100014 (hw flag): %02x\n",
-					*(uint8_t*)(0xFF100014ul));
-				// Dump game entry code at $002D80
-				debugf("=== GAME ENTRY $002D80 ===\n");
-				for (uint32_t addr = 0x002D80; addr < 0x002DC0; addr += 2) {
-					uint16_t w = *(uint16_t*)((addr & 0xFFFFFF) + 0xFF000000);
-					debugf("  %06lx: %04x\n", (unsigned long)addr, w);
-				}
-				// Dump subroutine at $21C0 (called from light-path VBlank)
-				debugf("=== SUB $0021C0 ===\n");
-				for (uint32_t addr = 0x0021C0; addr < 0x002240; addr += 2) {
-					uint16_t w = *(uint16_t*)((addr & 0xFFFFFF) + 0xFF000000);
-					debugf("  %06lx: %04x\n", (unsigned long)addr, w);
-				}
-				// Dump 68K register state
-				debugf("=== 68K REGS ===\n");
-				debugf("  D0-D3: %08lx %08lx %08lx %08lx\n",
-					m64k.dregs[0], m64k.dregs[1], m64k.dregs[2], m64k.dregs[3]);
-				debugf("  D4-D7: %08lx %08lx %08lx %08lx\n",
-					m64k.dregs[4], m64k.dregs[5], m64k.dregs[6], m64k.dregs[7]);
-				debugf("  A0-A3: %08lx %08lx %08lx %08lx\n",
-					m64k.aregs[0], m64k.aregs[1], m64k.aregs[2], m64k.aregs[3]);
-				debugf("  A4-A7: %08lx %08lx %08lx %08lx\n",
-					m64k.aregs[4], m64k.aregs[5], m64k.aregs[6], m64k.aregs[7]);
-				debugf("  SR=%04lx USP=%08lx SSP=%08lx\n",
-					m64k.sr, m64k.usp, m64k.ssp);
-				debugf("=== END DUMP ===\n");
-			}
-		}
 
 		debugf("[PROFILE] cpu:%.2f%% io:%.2f%% draw:%.2f%% dma:%.2f%% PC:%06lx\n",
 			(float)emu_time * 100.f / (float)(TICKS_PER_SECOND / 60),

@@ -7,8 +7,6 @@
 #include "hw.h"
 #include "platform.h"
 
-static int video_drawn_sprites;
-static int video_drawn_fix;
 
 // Magic table to calculate pixel-perfect vertical shrinking.
 // This table can be thought of a condensed version of the original
@@ -70,10 +68,8 @@ static void render_fix(void) {
 		fix += 2; // skip two lines
 		for (int j=0;j<28;j++) {
 			uint16_t v = *fix++;
-			if (v) {
+			if (v)
 				draw_sprite_fix(v & 0xFFF, (v >> 12) & 0xF, i*8, j*8);
-				video_drawn_fix++;
-			}
 		}
 		fix += 2;
 	}
@@ -188,7 +184,6 @@ static void render_sprites(void) {
 
 						// Draw the tile
 						draw_sprite(tnum, palnum, sx, ssy, sw, ssh, tc&1, tc&2);
-						video_drawn_sprites++;
 					}
 				}
 
@@ -209,18 +204,10 @@ static void render_sprites(void) {
 
 
 void video_render(void) {
-	video_drawn_sprites = 0;
-	video_drawn_fix = 0;
 	render_begin();
 	render_sprites();
 	render_fix();
 	render_end();
-	debugf("[VIDEO] spr:%d fix:%d pal_bank:%d bkg:%04x scb3[0..3]:%04x %04x %04x %04x pal[0..3]:%04x %04x %04x %04x\n",
-		video_drawn_sprites, video_drawn_fix,
-		PALETTE_RAM_BANK, PALETTE_RAM[PALETTE_RAM_BANK+0xFFF],
-		VIDEO_RAM[0x8200], VIDEO_RAM[0x8201], VIDEO_RAM[0x8202], VIDEO_RAM[0x8203],
-		PALETTE_RAM[PALETTE_RAM_BANK], PALETTE_RAM[PALETTE_RAM_BANK+1],
-		PALETTE_RAM[PALETTE_RAM_BANK+2], PALETTE_RAM[PALETTE_RAM_BANK+3]);
 }
 
 void video_palette_w(uint32_t address, uint32_t val, int sz) {
