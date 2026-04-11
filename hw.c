@@ -5,11 +5,7 @@
 #include "roms.h"
 #include "video.h"
 #include "emu.h"
-#ifdef N64
-#include "m64k/m64k.h"
-#else
 #include "m68k.h"
-#endif
 #include "platform.h"
 
 // Typedefs for unaligned memory accesses
@@ -87,11 +83,6 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 		// If the PBROM area linearly mapped, update the mapping.
 		if (banks[0x2].mem) {
 			banks[0x2].mem = pbrom_linear() + val*0x100000;
-			#ifdef N64
-			extern m64k_t m64k;
-			m64k_map_memory(&m64k, 0x200000, 0x100000, banks[0x2].mem, false);
-			// m64k_map_memory_change(&m64k, pbrom_memid, banks[0x2].mem, false);
-			#endif
 		}
 		return;
 	}
@@ -206,8 +197,6 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 }
 
 
-#ifndef N64
-
 unsigned int  m68k_read_memory_8(unsigned int address) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 1);
@@ -256,7 +245,6 @@ void m68k_write_memory_32(unsigned int address, unsigned int value) {
 	if (b->mem) { *(u_uint32_t*)(b->mem + (address & b->mask)) = BE32(value); return; }
 	debugf("[MEM] unknown write32: %06x = %08x\n", (unsigned int)address, (unsigned int)value);
 }
-#endif
 
 
 unsigned int m68k_read_disassembler_8(unsigned int address) {
@@ -298,43 +286,8 @@ void hw_init(void) {
 	banks[0xC] = (Bank){ BIOS,             0x1FFFF,   NULL,            write_unk };
 	banks[0xD] = (Bank){ BACKUP_RAM,       0x0FFFF,   NULL,            write_unk };
 
-	#ifdef N64
-	extern m64k_t m64k;
-	disable_interrupts();
-
-	m64k_map_memory(&m64k, 0x000000, 0x080000, P_ROM+0x000000, false);
-	m64k_map_memory(&m64k, 0x080000, 0x080000, P_ROM+0x080000, false);
-	m64k_map_memory(&m64k, 0x100000, 0x010000, WORK_RAM,   true);
-	if (PB_ROM) {
-		m64k_map_memory(&m64k, 0x200000, 0x100000, PB_ROM+0x000000, false);
-	}
-	m64k_map_memory(&m64k, 0xC00000, 0x020000, BIOS,       false);
-	m64k_map_memory(&m64k, 0xD00000, 0x010000, BACKUP_RAM, true);
-
-	// Install special exception handler, so that we can handle our own
-	// exceptions
-	extern uint32_t mvs_intvector[];
-	extern uint32_t mvs_tlbvector[];
-	volatile uint32_t *mips_exc_vector = (volatile uint32_t*)0x80000180;
-	volatile uint32_t *mips_tlb_vector = (volatile uint32_t*)0x80000080;
-
-	for (int i=0;i<4;i++) {
-		mips_exc_vector[i] = mvs_intvector[i];
-		mips_tlb_vector[i] = mvs_tlbvector[i];
-	}
-	data_cache_hit_writeback_invalidate(mips_exc_vector, 16);
-	data_cache_hit_writeback_invalidate(mips_tlb_vector, 16);
-	inst_cache_hit_invalidate(mips_exc_vector, 16);
-	inst_cache_hit_invalidate(mips_tlb_vector, 16);
-
-	enable_interrupts();
-
-	#if 0
-	// Self-tests just to make sure we're not getting things wrong
-	assert(memcmp((void*)0x200000, P_ROM+0x100000, 1024*1024) == 0);
-	assert(memcmp((void*)0xC00000, BIOS, 128*1024) == 0);
-	assert(memcmp((void*)0x000000+1, P_ROM+1, 1024*1024-1) == 0);
-	#endif
+	// NOTE: m64k TLB memory mapping and custom exception vectors removed.
+	// Musashi uses the bank-based m68k_read/write_memory callbacks above.
 
 	#endif
 

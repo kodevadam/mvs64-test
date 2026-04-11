@@ -3,11 +3,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include "emu.h"
-#ifdef N64
-#include "m64k/m64k.h"
-#else
 #include "m68k.h"
-#endif
 #include "hw.h"
 #include "video.h"
 #include "roms.h"
@@ -57,9 +53,6 @@ void cpu_start_trace(int cnt) {
 }
 
 static int g_frame;
-#ifdef N64
-m64k_t m64k;
-#endif
 static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
 static EmuEvent events[MAX_EVENTS];
@@ -70,11 +63,13 @@ static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
 	if (clock > m68k_clock) {
 		#ifdef N64
-		debugf("m68k_exec: %d\n", (int)(clock - m68k_clock));
-		m68k_clock = m64k_run(&m64k, clock);
-		#else
-		m68k_clock += m68k_execute(clock - m68k_clock);	
+		// Idle-skip: if the 68K is spinning at the configured idle-skip PC,
+		// fast-forward the clock instead of emulating the busy-wait cycle by cycle.
+		if (rom_pc_idle_skip && (m68k_get_reg(NULL, M68K_REG_PC) & 0xFFFFFF) == rom_pc_idle_skip)
+			m68k_clock = clock;
+		else
 		#endif
+			m68k_clock += m68k_execute(clock - m68k_clock);
 	}
 	return m68k_clock * M68K_CLOCK_DIV;
 }
@@ -105,20 +100,12 @@ int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg) {
 void emu_change_event(int event_id, int64_t newclock) {
 	events[event_id].clock = newclock;
 	if (events[event_id].current) {
-		#ifdef N64
-		m64k_run_stop(&m64k);
-		#else
 		m68k_end_timeslice();
-		#endif
 	}
 }
 
 int64_t emu_clock(void) {
-	#ifdef N64
-	return m64k_get_clock(&m64k) * M68K_CLOCK_DIV;
-	#else
 	return g_clock + m68k_cycles_run() * M68K_CLOCK_DIV;
-	#endif
 }
 
 int64_t emu_clock_frame(void) {
@@ -126,39 +113,17 @@ int64_t emu_clock_frame(void) {
 }
 
 void emu_cpu_reset(void) {
-	#ifdef N64
-	m64k_pulse_reset(&m64k);
-	#else
 	m68k_pulse_reset();
-	#endif
 }
 
 uint32_t emu_pc(void) {
-	#ifdef N64
-	return m64k_get_pc(&m64k) & 0xFFFFFF;
-	#else
 	return m68k_get_reg(NULL, M68K_REG_PC) & 0xFFFFFF;
-	#endif
 }
 
 void emu_cpu_irq(int irq, bool on) {
-	#ifdef N64
-	m64k_set_virq(&m64k, irq, on);
-	#else
 	m68k_set_virq(irq, on);
-	#endif
 }
 
-#ifdef N64
-int cpu_irqack(void *ctx, int level)
-{	
-	// On NeoGeo hardware, interrupts must be manually acknowledged via a write
-	// to register 0x3C000C. So we do nothing here.
-	// NOTE: we still must register this hook, otherwise the m64k core will
-	// by default auto-acnowledge the interrupts.
-	return 0;
-}
-#endif
 
 uint32_t emu_vblank_start(void* arg) {
 	emu_cpu_irq(1, true);
@@ -259,22 +224,13 @@ int main(int argc, char *argv[]) {
 	rom_load(argv[1]);
 	#endif
 
-	#ifdef N64
-	m64k_init(&m64k);
-	m64k_set_hook_irqack(&m64k, cpu_irqack, NULL);
-	#else
 	m68k_init();
-	#endif
 
 	hw_init();
 	g_clock = 0;
 
-	#ifdef N64
-	m64k_pulse_reset(&m64k);
-	#else
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
-	m68k_pulse_reset();	
-	#endif
+	m68k_pulse_reset();
 	m68k_clock = 0;
 
 	emu_add_event(LINE_CLOCK*24,  emu_render, NULL);
@@ -302,9 +258,6 @@ int main(int argc, char *argv[]) {
 			(float)profile_hw_io * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)render_time * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)profile_dma_load * 100.f / (float)(TICKS_PER_SECOND / 60),
-			#ifdef N64
-			m64k_get_pc(&m64k));
-			#else
 			(uint32_t)m68k_get_reg(NULL, M68K_REG_PC));
 			#endif
 		#endif
