@@ -12,7 +12,7 @@ include $(N64_INST)/include/n64.mk
 # 68K CPU core selection: USE_FAME=1 for FAME, otherwise Musashi
 ifdef USE_FAME
 src_68k = cpu/fame/famec.c fame_adapter.c
-CFLAGS += -DUSE_FAME -DFAME_BIG_ENDIAN
+CFLAGS += -DUSE_FAME -DFAME_BIG_ENDIAN -I.
 # FAME is enormous; needs reduced optimization to avoid GCC memory issues
 $(BUILD_DIR)/cpu/fame/famec.o: CFLAGS += -g0 -O2 -fno-expensive-optimizations
 else
