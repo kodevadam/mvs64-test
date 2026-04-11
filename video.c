@@ -215,9 +215,12 @@ void video_render(void) {
 	render_sprites();
 	render_fix();
 	render_end();
-	debugf("[VIDEO] sprites:%d fix:%d pal_bank:%d bkg:%04x\n",
+	debugf("[VIDEO] spr:%d fix:%d pal_bank:%d bkg:%04x scb3[0..3]:%04x %04x %04x %04x pal[0..3]:%04x %04x %04x %04x\n",
 		video_drawn_sprites, video_drawn_fix,
-		PALETTE_RAM_BANK, PALETTE_RAM[PALETTE_RAM_BANK+0xFFF]);
+		PALETTE_RAM_BANK, PALETTE_RAM[PALETTE_RAM_BANK+0xFFF],
+		VIDEO_RAM[0x8200], VIDEO_RAM[0x8201], VIDEO_RAM[0x8202], VIDEO_RAM[0x8203],
+		PALETTE_RAM[PALETTE_RAM_BANK], PALETTE_RAM[PALETTE_RAM_BANK+1],
+		PALETTE_RAM[PALETTE_RAM_BANK+2], PALETTE_RAM[PALETTE_RAM_BANK+3]);
 }
 
 void video_palette_w(uint32_t address, uint32_t val, int sz) {
