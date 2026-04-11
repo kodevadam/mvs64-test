@@ -968,41 +968,15 @@ int m68k_execute(int num_cycles)
 		//rasky: disable bus error for performance
 		//m68ki_check_bus_error_trap();
 
-		/* Main loop.  Keep going until we run out of clock cycles */
+		/* Main loop.  Keep going until we run out of clock cycles.
+		 * Optimized: removed REG_PPC store (only needed for address error
+		 * exceptions which are disabled), removed auto-disabled trace/FC/hook
+		 * macros, merged cycle lookup with dispatch. */
 		do
 		{
-			//int i;
-			/* Set tracing accodring to T1. (T0 is done inside instruction) */
-			m68ki_trace_t1(); /* auto-disable (see m68kcpu.h) */
-
-			/* Set the address space for reads */
-			m68ki_use_data_space(); /* auto-disable (see m68kcpu.h) */
-
-			/* Call external hook to peek at CPU */
-			m68ki_instr_hook(REG_PC); /* auto-disable (see m68kcpu.h) */
-
-			/* Record previous program counter */
-			REG_PPC = REG_PC;
-#if 0
-			// rasky: disable bus error for performance
-			/* Record previous D/A register state (in case of bus error) */
-			for (i = 15; i >= 0; i--){
-				REG_DA_SAVE[i] = REG_DA[i];
-			}
-#endif
-			/* Read an instruction and call its handler */
 			REG_IR = m68ki_read_imm_16();
-			{
-				/* Load cycle cost before dispatching handler.
-				 * The handler execution gives the pipeline time to
-				 * service the CYC_INSTRUCTION cache miss. */
-				int cyc = CYC_INSTRUCTION[REG_IR];
-				m68ki_instruction_jump_table[REG_IR]();
-				USE_CYCLES(cyc);
-			}
-
-			/* Trace m68k_exception, if necessary */
-			m68ki_exception_if_trace(); /* auto-disable (see m68kcpu.h) */
+			m68ki_instruction_jump_table[REG_IR]();
+			USE_CYCLES(CYC_INSTRUCTION[REG_IR]);
 		} while(GET_CYCLES() > 0);
 
 		/* set previous PC to current PC for the next entry into the loop */

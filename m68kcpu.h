@@ -1914,6 +1914,7 @@ static void m68ki_exception_privilege_violation(void)
 	}
 	#endif /* M68K_EMULATE_ADDRESS_ERROR */
 
+	REG_PPC = REG_PC - 2; /* set here instead of every instruction in main loop */
 	m68ki_stack_frame_0000(REG_PPC, sr, EXCEPTION_PRIVILEGE_VIOLATION);
 	m68ki_jump_vector(EXCEPTION_PRIVILEGE_VIOLATION);
 
@@ -1969,6 +1970,7 @@ static void m68ki_exception_1010(void)
 #endif
 
 	sr = m68ki_init_exception();
+	REG_PPC = REG_PC - 2;
 	m68ki_stack_frame_0000(REG_PPC, sr, EXCEPTION_1010);
 	m68ki_jump_vector(EXCEPTION_1010);
 
@@ -1988,6 +1990,7 @@ static void m68ki_exception_1111(void)
 #endif
 
 	sr = m68ki_init_exception();
+	REG_PPC = REG_PC - 2;
 	m68ki_stack_frame_0000(REG_PPC, sr, EXCEPTION_1111);
 	m68ki_jump_vector(EXCEPTION_1111);
 
@@ -2019,6 +2022,7 @@ static void m68ki_exception_illegal(void)
 	}
 	#endif /* M68K_EMULATE_ADDRESS_ERROR */
 
+	REG_PPC = REG_PC - 2;
 	m68ki_stack_frame_0000(REG_PPC, sr, EXCEPTION_ILLEGAL_INSTRUCTION);
 	m68ki_jump_vector(EXCEPTION_ILLEGAL_INSTRUCTION);
 
