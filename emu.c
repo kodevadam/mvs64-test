@@ -220,10 +220,6 @@ int main(int argc, char *argv[]) {
 
 	m68k_init();
 
-	/* Force first fetch pointer recalculation */
-	extern void m68k_reset_fetch_ptr(void);
-	m68k_reset_fetch_ptr();
-
 	hw_init();
 	g_clock = 0;
 

@@ -1000,13 +1000,6 @@ typedef struct m68ki_cpu_core_s
 	void (*set_fc_callback)(unsigned int new_fc);     /* Called when the CPU function code changes */
 	void (*instr_hook_callback)(unsigned int pc);     /* Called every instruction cycle prior to execution */
 
-	/* Fast fetch pointer: direct host pointer for sequential instruction reads.
-	 * fetch_ptr points to the base of the current memory region so that
-	 * fetch_ptr[REG_PC] gives the instruction word directly without going
-	 * through the memory callback + bank lookup. Recalculated on jumps/branches. */
-	uint16* fetch_ptr;        /* host base pointer (NULL = use slow path) */
-	uint    fetch_region;     /* top nibble of the currently cached region */
-
 } m68ki_cpu_core;
 
 #ifndef M68K_RECOMPILER
@@ -1081,16 +1074,8 @@ static inline uint m68ki_read_imm_16(void)
 	return result;
 }
 #else
-	{
-		uint pc = REG_PC;
-		REG_PC = pc + 2;
-		/* Fast path: use cached fetch pointer for sequential reads */
-		uint16* fp = m68ki_cpu.fetch_ptr;
-		if (fp) {
-			return fp[pc >> 1];
-		}
-		return m68k_read_immediate_16(ADDRESS_68K(pc));
-	}
+	REG_PC += 2;
+	return m68k_read_immediate_16(ADDRESS_68K(REG_PC-2));
 #endif /* M68K_EMULATE_PREFETCH */
 }
 
@@ -1134,18 +1119,8 @@ static inline uint m68ki_read_imm_32(void)
 #else
 	m68ki_set_fc(FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
 	m68ki_check_address_error(REG_PC, MODE_READ, FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
-	{
-		uint pc = REG_PC;
-		REG_PC = pc + 4;
-		uint16* fp = m68ki_cpu.fetch_ptr;
-		if (fp) {
-			/* Read two consecutive 16-bit words via host pointer */
-			uint hi = fp[pc >> 1];
-			uint lo = fp[(pc >> 1) + 1];
-			return (hi << 16) | lo;
-		}
-		return m68k_read_immediate_32(ADDRESS_68K(pc));
-	}
+	REG_PC += 4;
+	return m68k_read_immediate_32(ADDRESS_68K(REG_PC-4));
 #endif /* M68K_EMULATE_PREFETCH */
 }
 #endif /* M68K_RECOMPILER */
