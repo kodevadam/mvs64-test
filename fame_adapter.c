@@ -208,7 +208,19 @@ void fame_adapter_reset(void) {
  * Returns the actual number of cycles consumed.
  */
 int fame_adapter_execute(int cycles) {
+    static int trace_count = 0;
     fame_initial_cycles = cycles;
+
+    /* One-time trace: dump first 20 opcodes at BIOS entry */
+    if (trace_count < 20) {
+        uint32_t pc = fame_ctx.pc & 0xFFFFFF;
+        uint16_t *p = (uint16_t*)(fame_ctx.Fetch[pc >> 16] + pc);
+        debugf("[FAME] exec pc=%06lx opcode=%04x [%04x %04x %04x] SR=%04x cyc=%d\n",
+            (unsigned long)pc, p[0], p[1], p[2], p[3],
+            fame_ctx.sr, cycles);
+        trace_count++;
+    }
+
     return fm68k_emulate(&fame_ctx, cycles, fm68k_reason_emulate);
 }
 
