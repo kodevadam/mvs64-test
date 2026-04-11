@@ -5,3 +5,4 @@ libdragon
 *.dfs
 *.elf
 *.z64
+picodrive64/
