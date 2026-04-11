@@ -116,8 +116,12 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 		return val | read_hwio(addr+2, 2);
 	}
 	if (sz == 2) {
-		/* Word read: combine two byte reads (high byte at even addr, low at odd) */
-		return (read_hwio(addr+0, 1) << 8) | read_hwio(addr+1, 1);
+		/* Some NeoGeo registers are byte-addressed (0x30/0x32/0x38 ranges).
+		 * Split word reads into two byte reads for those. LSPC (0x3C) and
+		 * palette (0x40) are natively word-addressed — pass through. */
+		unsigned int region = (addr >> 16);
+		if (region == 0x30 || region == 0x32 || region == 0x38)
+			return (read_hwio(addr+0, 1) << 8) | read_hwio(addr+1, 1);
 	}
 
 	// Idle skip for RTC Wait Pulse in BIOS boot
@@ -163,10 +167,12 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		return;
 	}
 	if (sz == 2) {
-		/* Word write: split into two byte writes */
-		write_hwio(addr+0, (val>>8) & 0xFF, 1);
-		write_hwio(addr+1, val & 0xFF, 1);
-		return;
+		unsigned int region = (addr >> 16);
+		if (region == 0x30 || region == 0x32 || region == 0x38) {
+			write_hwio(addr+0, (val>>8) & 0xFF, 1);
+			write_hwio(addr+1, val & 0xFF, 1);
+			return;
+		}
 	}
 
 	if ((addr>>16) == 0x30) switch (addr&0xFFFF) {
