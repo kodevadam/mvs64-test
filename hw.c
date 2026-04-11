@@ -5,8 +5,10 @@
 #include "roms.h"
 #include "video.h"
 #include "emu.h"
+#ifndef USE_FAME
 #include "m68k.h"
 #include "m68kcpu.h"
+#endif
 #include "platform.h"
 
 // Typedefs for unaligned memory accesses
@@ -197,7 +199,8 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 }
 
 
-// Memory access functions.
+#ifndef USE_FAME
+// Musashi memory access functions.
 // The fast path for P-ROM (0x0xxxxx) and WORK_RAM (0x1xxxxx) is inlined
 // in m68kinline.h. These functions handle the remaining cases.
 unsigned int m68k_read_memory_8_slow(unsigned int address) {
@@ -260,6 +263,7 @@ unsigned int m68k_read_disassembler_32(unsigned int address) {
 		return BE32(*(u_uint32_t*)(b->mem + (address & b->mask)));
 	return 0xFFFFFFFF;
 }
+#endif /* !USE_FAME */
 
 void hw_init(void) {
 	uint8_t *PB_ROM = pbrom_linear();

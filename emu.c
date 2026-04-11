@@ -3,7 +3,11 @@
 #include <string.h>
 #include <inttypes.h>
 #include "emu.h"
+#ifdef USE_FAME
+#include "fame_adapter.h"
+#else
 #include "m68k.h"
+#endif
 #include "hw.h"
 #include "video.h"
 #include "roms.h"
@@ -63,7 +67,11 @@ static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
 	if (clock > m68k_clock) {
 		int ncycles = (int)(clock - m68k_clock);
+		#ifdef USE_FAME
+		int executed = fame_adapter_execute(ncycles);
+		#else
 		int executed = m68k_execute(ncycles);
+		#endif
 		m68k_clock += executed;
 	}
 	return m68k_clock * M68K_CLOCK_DIV;
@@ -95,12 +103,20 @@ int emu_add_event(int64_t clock, EmuEventCb cb, void *cbarg) {
 void emu_change_event(int event_id, int64_t newclock) {
 	events[event_id].clock = newclock;
 	if (events[event_id].current) {
+		#ifdef USE_FAME
+		fame_adapter_end_timeslice();
+		#else
 		m68k_end_timeslice();
+		#endif
 	}
 }
 
 int64_t emu_clock(void) {
+	#ifdef USE_FAME
+	return g_clock; /* FAME tracks cycles via execute return value */
+	#else
 	return g_clock + m68k_cycles_run() * M68K_CLOCK_DIV;
+	#endif
 }
 
 int64_t emu_clock_frame(void) {
@@ -108,15 +124,27 @@ int64_t emu_clock_frame(void) {
 }
 
 void emu_cpu_reset(void) {
+	#ifdef USE_FAME
+	fame_adapter_reset();
+	#else
 	m68k_pulse_reset();
+	#endif
 }
 
 uint32_t emu_pc(void) {
+	#ifdef USE_FAME
+	return fame_adapter_get_pc();
+	#else
 	return m68k_get_reg(NULL, M68K_REG_PC) & 0xFFFFFF;
+	#endif
 }
 
 void emu_cpu_irq(int irq, bool on) {
+	#ifdef USE_FAME
+	fame_adapter_set_virq(irq, on);
+	#else
 	m68k_set_virq(irq, on);
+	#endif
 }
 
 
@@ -218,13 +246,21 @@ int main(int argc, char *argv[]) {
 	rom_load(argv[1]);
 	#endif
 
+	#ifdef USE_FAME
+	fame_adapter_init();
+	#else
 	m68k_init();
+	#endif
 
 	hw_init();
 	g_clock = 0;
 
+	#ifdef USE_FAME
+	fame_adapter_reset();
+	#else
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
 	m68k_pulse_reset();
+	#endif
 	m68k_clock = 0;
 
 	emu_add_event(LINE_CLOCK*24,  emu_render, NULL);
@@ -252,7 +288,7 @@ int main(int argc, char *argv[]) {
 			(float)profile_hw_io * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)render_time * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)profile_dma_load * 100.f / (float)(TICKS_PER_SECOND / 60),
-			(uint32_t)m68k_get_reg(NULL, M68K_REG_PC));
+			(uint32_t)emu_pc());
 		#endif
 
 		rom_next_frame();
