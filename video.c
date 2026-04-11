@@ -7,6 +7,9 @@
 #include "hw.h"
 #include "platform.h"
 
+static int video_drawn_sprites;
+static int video_drawn_fix;
+
 // Magic table to calculate pixel-perfect vertical shrinking.
 // This table can be thought of a condensed version of the original
 // NeoGeo L0 ROM, but we just need 16 bytes to achieve the same results.
@@ -204,9 +207,6 @@ static void render_sprites(void) {
 }
 
 
-
-static int video_drawn_sprites = 0;
-static int video_drawn_fix = 0;
 
 void video_render(void) {
 	video_drawn_sprites = 0;
