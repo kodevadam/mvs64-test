@@ -371,6 +371,7 @@ typedef uint32 uint64;
 
 #define CYC_INSTRUCTION  m68ki_cpu.cyc_instruction
 #define CYC_EXCEPTION    m68ki_cpu.cyc_exception
+#define CPU_FETCH_BASE   m68ki_cpu.pc_fetch_base
 #define CYC_BCC_NOTAKE_B -2 //m68ki_cpu.cyc_bcc_notake_b
 #define CYC_BCC_NOTAKE_W 2 //m68ki_cpu.cyc_bcc_notake_w
 #define CYC_DBCC_F_NOEXP -2 //m68ki_cpu.cyc_dbcc_f_noexp
@@ -988,6 +989,12 @@ typedef struct m68ki_cpu_core_s
 	const uint8* cyc_instruction;
 	const uint8* cyc_exception;
 
+	/* Cached PC base pointer for fast instruction fetches.
+	 * pc_base is set so that *(uint16_t*)(pc_base + REG_PC) gives the
+	 * correct opcode word, skipping the bank-check overhead on every fetch.
+	 * Updated on jumps/exceptions that may cross memory regions. */
+	uint8* pc_fetch_base;
+
 	/* Callbacks to host */
 	int  (*int_ack_callback)(int int_line);           /* Interrupt Acknowledge */
 	void (*bkpt_ack_callback)(unsigned int data);     /* Breakpoint Acknowledge */
@@ -1040,6 +1047,25 @@ char* m68ki_disassemble_quick(unsigned int pc, unsigned int cpu_type);
 /* ======================================================================== */
 
 
+/* ----------------------- PC Fetch Base Pointer -------------------------- */
+
+/* Recompute the cached PC base pointer for fast instruction fetches.
+ * This maps the 68K PC region to a host memory pointer so that
+ * *(uint16_t*)(pc_fetch_base + pc) gives the correct opcode.
+ * Must be called whenever the PC jumps to a different memory region. */
+static inline void m68ki_update_fetch_base(void)
+{
+	uint pc = REG_PC & CPU_ADDRESS_MASK;
+	uint bank = (pc >> 20) & 0xF;
+	switch (bank) {
+	case 0x0: CPU_FETCH_BASE = P_ROM; break;
+	case 0x1: CPU_FETCH_BASE = WORK_RAM - 0x100000; break;
+	case 0xC: CPU_FETCH_BASE = BIOS - 0xC00000; break;
+	default:  CPU_FETCH_BASE = NULL; break;
+	}
+}
+
+
 /* ---------------------------- Read Immediate ---------------------------- */
 
 extern uint pmmu_translate_addr(uint addr_in);
@@ -1051,13 +1077,6 @@ static inline uint m68ki_read_imm_16(void)
 {
 	m68ki_set_fc(FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
 	m68ki_check_address_error(REG_PC, MODE_READ, FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
-
-#if M68K_SEPARATE_READS
-#if M68K_EMULATE_PMMU
-	if (PMMU_ENABLED)
-	    address = pmmu_translate_addr(address);
-#endif
-#endif
 
 #if M68K_EMULATE_PREFETCH
 {
@@ -1074,8 +1093,17 @@ static inline uint m68ki_read_imm_16(void)
 	return result;
 }
 #else
-	REG_PC += 2;
-	return m68k_read_immediate_16(ADDRESS_68K(REG_PC-2));
+	/* Fast path: use cached PC base pointer to avoid bank-check overhead.
+	 * CPU_FETCH_BASE is set so that (base + pc) points directly into the
+	 * host memory for the current PC region (P-ROM, WORK_RAM, or BIOS).
+	 * Falls back to the full memory read for unmapped regions (rare). */
+	{
+		uint pc = REG_PC;
+		REG_PC = pc + 2;
+		if (__builtin_expect(CPU_FETCH_BASE != NULL, 1))
+			return BE16(*(uint16_t*)(CPU_FETCH_BASE + (pc & CPU_ADDRESS_MASK)));
+		return m68k_read_immediate_16(ADDRESS_68K(pc));
+	}
 #endif /* M68K_EMULATE_PREFETCH */
 }
 
@@ -1119,8 +1147,15 @@ static inline uint m68ki_read_imm_32(void)
 #else
 	m68ki_set_fc(FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
 	m68ki_check_address_error(REG_PC, MODE_READ, FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
-	REG_PC += 4;
-	return m68k_read_immediate_32(ADDRESS_68K(REG_PC-4));
+	{
+		uint pc = REG_PC;
+		REG_PC = pc + 4;
+		if (__builtin_expect(CPU_FETCH_BASE != NULL, 1)) {
+			typedef uint32_t u_uint32_t __attribute__((aligned(1)));
+			return BE32(*(u_uint32_t*)(CPU_FETCH_BASE + (pc & CPU_ADDRESS_MASK)));
+		}
+		return m68k_read_immediate_32(ADDRESS_68K(pc));
+	}
 #endif /* M68K_EMULATE_PREFETCH */
 }
 #endif /* M68K_RECOMPILER */
@@ -1472,6 +1507,7 @@ static inline void m68ki_fake_pull_32(void)
 static inline void m68ki_jump(uint new_pc)
 {
 	REG_PC = new_pc;
+	m68ki_update_fetch_base();
 	m68ki_pc_changed(REG_PC);
 }
 
@@ -1479,6 +1515,7 @@ static inline void m68ki_jump_vector(uint vector)
 {
 	REG_PC = (vector<<2) + REG_VBR;
 	REG_PC = m68ki_read_data_32(REG_PC);
+	m68ki_update_fetch_base();
 	m68ki_pc_changed(REG_PC);
 }
 
@@ -1505,6 +1542,7 @@ static inline void m68ki_branch_16(uint offset)
 static inline void m68ki_branch_32(uint offset)
 {
 	REG_PC += offset;
+	m68ki_update_fetch_base();
 	m68ki_pc_changed(REG_PC);
 	if (m68k_check_idle_skip(REG_PC))
 		m68k_consume_timeslice();
