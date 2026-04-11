@@ -16,7 +16,11 @@
 typedef uint16_t u_uint16_t __attribute__((aligned(1)));
 typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 
-extern void cpu_start_trace(int cnt);
+// Z80 sound CPU stub: fake the command acknowledge protocol.
+// On real hardware, the Z80 reads the command and echoes it back
+// (with bit 7 set) via a response latch. Without a Z80 emulator,
+// we just latch the expected response immediately.
+static uint8_t z80_result = 0x01;  // initial value expected by BIOS
 
 #ifdef N64
 #define ALIGN_64K __attribute__((aligned(64*1024)))
@@ -122,7 +126,7 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 		case 0x01: assert(sz==1); return 0xFF ^ DIPSW_FREEPLAY; // dipswitches
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
-		case 0x00: assert(sz==1); debugf("[HWIO] Read Z80 command\n"); return 1;
+		case 0x00: assert(sz==1); return z80_result;
 		case 0x01: assert(sz==1); return input_status_a_r();
 
 	} else if ((addr>>16) == 0x38) switch (addr&0xFFFF) {
@@ -154,7 +158,15 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 		case 0x01: watchdog_kick(); return;
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
-		case 0x00: assert(sz==1); debugf("[HWIO] Send Z80 command: %02x\n", (unsigned int)val); return;
+		case 0x00: assert(sz==1);
+			// Fake Z80 acknowledge: BIOS commands 0x01/0x03 expect exact echo;
+			// all other commands expect echo with bit 7 set.
+			if (val == 0x01 || val == 0x03)
+				z80_result = val;
+			else
+				z80_result = val | 0x80;
+			debugf("[HWIO] Send Z80 command: %02x (ack: %02x)\n", (unsigned int)val, z80_result);
+			return;
 
 	} else if ((addr>>16) == 0x38) switch (addr&0xFFFF) {
 		case 0x51: rtc_data_w(val&1); rtc_clock_w(val&2); rtc_stb_w(val&4); return;
