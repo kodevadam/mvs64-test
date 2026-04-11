@@ -288,6 +288,12 @@ void hw_init(void) {
 /* Update the fetch pointer for fast instruction reads.
  * Maps 68K PC regions to direct host memory pointers so that
  * m68ki_read_imm_16 can bypass the bank lookup entirely. */
+void m68k_reset_fetch_ptr(void) {
+	extern m68ki_cpu_core m68ki_cpu;
+	m68ki_cpu.fetch_ptr = NULL;
+	m68ki_cpu.fetch_region = 0xFF;
+}
+
 void m68k_update_fetch_ptr(unsigned int pc) {
 	extern m68ki_cpu_core m68ki_cpu;
 	unsigned int region = (pc >> 20) & 0xF;
