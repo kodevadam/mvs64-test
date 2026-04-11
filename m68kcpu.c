@@ -48,6 +48,27 @@ extern void m68ki_build_opcode_table(void);
 #include "m68kops.h"
 #include "m68kcpu.h"
 
+#include <stdlib.h>
+#include <string.h>
+
+/* Two-level opcode dispatch for cache efficiency.
+ * The flat 256KB jump table (65536 x 4-byte pointers) thrashes the VR4300's
+ * 16KB D-cache. By splitting it into 256 separately-allocated 1KB sub-tables,
+ * we get much better cache locality: instructions with the same top byte
+ * (same instruction type) share a 1KB sub-table that fits in just 64 cache
+ * lines. Only the actively-used sub-tables need to be in D-cache at once. */
+typedef void (*m68k_handler_t)(void);
+static m68k_handler_t *m68k_dispatch_l2[256];
+
+static void m68k_init_dispatch(void) {
+	for (int i = 0; i < 256; i++) {
+		m68k_dispatch_l2[i] = (m68k_handler_t *)malloc(256 * sizeof(m68k_handler_t));
+		memcpy(m68k_dispatch_l2[i],
+		       &m68ki_instruction_jump_table[i * 256],
+		       256 * sizeof(m68k_handler_t));
+	}
+}
+
 // #include "m68kfpu.c"
 // #include "m68kmmu.h" // uses some functions from m68kfpu.c which are static !
 
@@ -976,7 +997,7 @@ int m68k_execute(int num_cycles)
 		{
 			REG_PPC = REG_PC;
 			REG_IR = m68ki_read_imm_16();
-			m68ki_instruction_jump_table[REG_IR]();
+			m68k_dispatch_l2[REG_IR >> 8][REG_IR & 0xFF]();
 		} while(GET_CYCLES() > 0);
 
 		/* set previous PC to current PC for the next entry into the loop */
@@ -1063,17 +1084,9 @@ unsigned int m68k_get_virq(unsigned int level)
 
 void m68k_init(void)
 {
-#if 0
-	/* RASKY: ocpode table is now built at compile time */
-	static uint emulation_initialized = 0;
+	/* Initialize two-level dispatch tables for cache-friendly opcode dispatch */
+	m68k_init_dispatch();
 
-	/* The first call to this function initializes the opcode handler jump table */
-	if(!emulation_initialized)
-		{
-		m68ki_build_opcode_table();
-		emulation_initialized = 1;
-	}
-#endif
 	m68k_set_int_ack_callback(NULL);
 	m68k_set_bkpt_ack_callback(NULL);
 	m68k_set_reset_instr_callback(NULL);
