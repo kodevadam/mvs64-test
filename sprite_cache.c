@@ -119,9 +119,24 @@ uint8_t* sprite_cache_insert(SpriteCache *c, uint32_t key) {
 		LOG("[CACHE] cache full (%d/%d)\n", c->num_sprites, c->max_sprites);
 		do {
 			if (c->tick_cutoff >= c->cur_tick) {
-				// LRU eviction exhausted: all entries are from the current tick.
-				// Force a full cache reset so we can keep going.
-				sprite_cache_reset(c);
+				/* LRU eviction exhausted: all entries are from the current tick.
+				 * Instead of resetting the ENTIRE cache (which causes a
+				 * catastrophic DMA spike as every sprite reloads from ROM),
+				 * force-evict random entries regardless of age. This spreads
+				 * the reload cost across multiple frames. */
+				int bidx = rand() & (c->num_buckets-1);
+				int evicted = 0;
+				for (int n = 0; n < c->num_buckets && evicted < c->max_sprites / 4; n++) {
+					SpriteCacheEntry *b = &c->buckets[bidx];
+					if (b->sprite) {
+						int sprite_idx = (b->sprite - c->sprites) / SPRITE_FREEIDX_SCALE;
+						c->free_sprite_indices[c->max_sprites - c->num_sprites] = sprite_idx;
+						c->num_sprites--;
+						b->sprite = NULL;
+						evicted++;
+					}
+					bidx = (bidx + 1) & (c->num_buckets-1);
+				}
 				break;
 			}
 			c->tick_cutoff++;
