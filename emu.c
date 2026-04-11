@@ -247,8 +247,6 @@ void emu_run_frame(void) {
     while (g_clock < vsync)
     	g_clock = m68k_exec(vsync);
 
-    // Frame completed
-	debugf("[EMU] Frame completed: %d (vsync: %llu)\n", g_frame, vsync);
     g_frame++;
 	g_clock_framebegin += FRAME_CLOCK;
 }
