@@ -309,7 +309,7 @@ int main(int argc, char *argv[]) {
 				// Dump 68K memory around the game's main loop addresses
 				for (uint32_t addr = 0x000980; addr < 0x001000; addr += 2) {
 					uint16_t w = *(uint16_t*)((addr & 0xFFFFFF) + 0xFF000000);
-					debugf("  %06x: %04x\n", addr, w);
+					debugf("  %06lx: %04x\n", (unsigned long)addr, w);
 				}
 				// Dump first few bytes of WORK_RAM to check game state
 				debugf("=== WORK_RAM[0..31] ===\n");
