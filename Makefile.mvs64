@@ -17,7 +17,7 @@ obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_
 src_makerom = mvsmakerom.c miniz.c
 obj_makerom = $(src_makerom:%.c=$(BUILD_DIR)/%.o)
 
-CFLAGS += -Wno-unused-function -O3 -flto
+CFLAGS += -Wno-unused-function -O3 -flto -fomit-frame-pointer -finline-limit=300 -funroll-loops
 LDFLAGS += -flto
 
 # Musashi's generated opcode file is huge; keep at -O2 to avoid long compile
