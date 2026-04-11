@@ -289,8 +289,6 @@ void hw_init(void) {
 	// NOTE: m64k TLB memory mapping and custom exception vectors removed.
 	// Musashi uses the bank-based m68k_read/write_memory callbacks above.
 
-	#endif
-
 	rtc_init_();
 	watchdog_init();
 }
