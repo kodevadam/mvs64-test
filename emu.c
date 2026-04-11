@@ -306,16 +306,33 @@ int main(int argc, char *argv[]) {
 			if (!game_dumped && pc < 0xC00000 && g_frame > 100) {
 				game_dumped = true;
 				debugf("=== GAME CODE DUMP (PC=%06lx) ===\n", pc);
-				// Dump 68K memory around the game's main loop addresses
-				for (uint32_t addr = 0x000980; addr < 0x001000; addr += 2) {
+				// Dump key WORK_RAM locations that control game state
+				debugf("=== KEY GAME STATE ===\n");
+				debugf("  $1021BE (sync flag): %02x\n",
+					*(uint8_t*)(0xFF1021BEul));
+				debugf("  $10FD80 (game ready): %02x\n",
+					*(uint8_t*)(0xFF10FD80ul));
+				debugf("  $1080E6 (vblank flag): %02x\n",
+					*(uint8_t*)(0xFF1080E6ul));
+				debugf("  $1080E7 (vblank copy): %02x\n",
+					*(uint8_t*)(0xFF1080E7ul));
+				debugf("  $1080E8 (vbl counter): %04x\n",
+					*(uint16_t*)(0xFF1080E8ul));
+				debugf("  $1080EA (xfer count): %04x\n",
+					*(uint16_t*)(0xFF1080EAul));
+				debugf("  $100014 (hw flag): %02x\n",
+					*(uint8_t*)(0xFF100014ul));
+				// Dump game entry code at $002D80
+				debugf("=== GAME ENTRY $002D80 ===\n");
+				for (uint32_t addr = 0x002D80; addr < 0x002DC0; addr += 2) {
 					uint16_t w = *(uint16_t*)((addr & 0xFFFFFF) + 0xFF000000);
 					debugf("  %06lx: %04x\n", (unsigned long)addr, w);
 				}
-				// Dump first few bytes of WORK_RAM to check game state
-				debugf("=== WORK_RAM[0..31] ===\n");
-				for (int i = 0; i < 32; i += 2) {
-					uint16_t w = *(uint16_t*)(0xFF100000 + i);
-					debugf("  10%04x: %04x\n", i, w);
+				// Dump subroutine at $21C0 (called from light-path VBlank)
+				debugf("=== SUB $0021C0 ===\n");
+				for (uint32_t addr = 0x0021C0; addr < 0x002240; addr += 2) {
+					uint16_t w = *(uint16_t*)((addr & 0xFFFFFF) + 0xFF000000);
+					debugf("  %06lx: %04x\n", (unsigned long)addr, w);
 				}
 				// Dump 68K register state
 				debugf("=== 68K REGS ===\n");
