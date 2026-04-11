@@ -185,9 +185,8 @@ static void render_sprites(void) {
 							else if (tc & 4) { tnum &= ~3; tnum |= aa & 3; }
 						}
 
-						// Skip blank tile (tile 0 is always transparent)
-						if (tnum != 0)
-							draw_sprite(tnum, palnum, sx, ssy, sw, ssh, tc&1, tc&2);
+						// Draw the tile
+						draw_sprite(tnum, palnum, sx, ssy, sw, ssh, tc&1, tc&2);
 					}
 				}
 
