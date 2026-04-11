@@ -201,25 +201,20 @@ unsigned int  m68k_read_memory_8(unsigned int address) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 1);
 	if (b->mem) return *(b->mem + (address & b->mask));
-	debugf("[MEM] unknown read8: %06x\n", (unsigned int)address);
 	return 0xFF;
 }
 
 unsigned int  m68k_read_memory_16(unsigned int address) {
-	assertf(!(address&1), "unaligned rm16: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 2);
 	if (b->mem) return BE16(*(u_uint16_t*)(b->mem + (address & b->mask)));
-	debugf("[MEM] unknown read16: %06x\n", (unsigned int)address);
 	return 0xFFFF;
 }
 
 unsigned int  m68k_read_memory_32(unsigned int address) {
-	assertf(!(address&1), "unaligned rm32: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 4);
 	if (b->mem) return BE32(*(u_uint32_t*)(b->mem + (address & b->mask)));
-	debugf("[MEM] unknown read32: %06x\n", (unsigned int)address);
 	return 0;
 }
 
@@ -227,23 +222,18 @@ void m68k_write_memory_8(unsigned int address, unsigned int value) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 1); return; }
 	if (b->mem) { *(b->mem + (address & b->mask)) = value; return; }
-	debugf("[MEM] unknown write8: %06x = %02x\n", (unsigned int)address, (unsigned int)value);
 }
 
 void m68k_write_memory_16(unsigned int address, unsigned int value) {
-	assertf(!(address&1), "unaligned wm16: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 2); return; }
 	if (b->mem) { *(u_uint16_t*)(b->mem + (address & b->mask)) = BE16(value); return; }
-	debugf("[MEM] unknown write16: %06x = %04x\n", (unsigned int)address, (unsigned int)value);
 }
 
 void m68k_write_memory_32(unsigned int address, unsigned int value) {
-	assertf(!(address&1), "unaligned wm32: %x\n", address);
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 4); return; }
 	if (b->mem) { *(u_uint32_t*)(b->mem + (address & b->mask)) = BE32(value); return; }
-	debugf("[MEM] unknown write32: %06x = %08x\n", (unsigned int)address, (unsigned int)value);
 }
 
 
