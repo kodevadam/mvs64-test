@@ -299,6 +299,40 @@ int main(int argc, char *argv[]) {
 		#ifdef N64
 		uint32_t emu_time = TICKS_DISTANCE(t0, TICKS_READ());
 
+		// One-time dump of game code when PC transitions from BIOS to game ROM
+		{
+			static bool game_dumped = false;
+			uint32_t pc = m64k_get_pc(&m64k) & 0xFFFFFF;
+			if (!game_dumped && pc < 0xC00000 && g_frame > 100) {
+				game_dumped = true;
+				debugf("=== GAME CODE DUMP (PC=%06lx) ===\n", pc);
+				// Dump 68K memory around the game's main loop addresses
+				for (uint32_t addr = 0x000980; addr < 0x001000; addr += 2) {
+					uint16_t w = *(uint16_t*)((addr & 0xFFFFFF) + 0xFF000000);
+					debugf("  %06x: %04x\n", addr, w);
+				}
+				// Dump first few bytes of WORK_RAM to check game state
+				debugf("=== WORK_RAM[0..31] ===\n");
+				for (int i = 0; i < 32; i += 2) {
+					uint16_t w = *(uint16_t*)(0xFF100000 + i);
+					debugf("  10%04x: %04x\n", i, w);
+				}
+				// Dump 68K register state
+				debugf("=== 68K REGS ===\n");
+				debugf("  D0-D3: %08lx %08lx %08lx %08lx\n",
+					m64k.dregs[0], m64k.dregs[1], m64k.dregs[2], m64k.dregs[3]);
+				debugf("  D4-D7: %08lx %08lx %08lx %08lx\n",
+					m64k.dregs[4], m64k.dregs[5], m64k.dregs[6], m64k.dregs[7]);
+				debugf("  A0-A3: %08lx %08lx %08lx %08lx\n",
+					m64k.aregs[0], m64k.aregs[1], m64k.aregs[2], m64k.aregs[3]);
+				debugf("  A4-A7: %08lx %08lx %08lx %08lx\n",
+					m64k.aregs[4], m64k.aregs[5], m64k.aregs[6], m64k.aregs[7]);
+				debugf("  SR=%04lx USP=%08lx SSP=%08lx\n",
+					m64k.sr, m64k.usp, m64k.ssp);
+				debugf("=== END DUMP ===\n");
+			}
+		}
+
 		debugf("[PROFILE] cpu:%.2f%% io:%.2f%% draw:%.2f%% dma:%.2f%% PC:%06lx\n",
 			(float)emu_time * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)profile_hw_io * 100.f / (float)(TICKS_PER_SECOND / 60),
