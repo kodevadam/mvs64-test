@@ -193,14 +193,6 @@ static void draw_sprite_fix(int spritenum, int palnum, int x, int y) {
 }
 
 static void render_begin_fix(void) {
-	fix_last_spritnum = -1;
-	fix_last_palnum = -1;
-
-	if (RSP_FIX_LAYER) {
-		rsp_fix_init();
-		return;
-	}
-
 	rdpq_sync_pipe();
 	rdpq_sync_tile();
 	rdpq_set_mode_copy(true);
@@ -214,6 +206,12 @@ static void render_begin_fix(void) {
 	rdpq_set_tile(TILE0, FMT_CI4, FIX_TMEM_ADDR, FIX_TMEM_PITCH, 0);  // used for drawing
 	rdpq_set_tile(TILE1, FMT_CI8, FIX_TMEM_ADDR, FIX_TMEM_PITCH, 0);  // used for loading
 	rdpq_set_tile_size(TILE0, 0, 0, 8, 8);
+
+	fix_last_spritnum = -1;
+	fix_last_palnum = -1;
+
+	if (RSP_FIX_LAYER)
+		rsp_fix_init();
 }
 
 static void render_end_fix(void) {}
