@@ -58,6 +58,7 @@ void cpu_start_trace(int cnt) {
 static int g_frame;
 #ifdef N64
 m64k_t m64k;
+bool game_dumped = false;
 #endif
 static uint64_t g_clock, g_clock_framebegin;
 static uint64_t m68k_clock;
@@ -162,9 +163,14 @@ int cpu_irqack(void *ctx, int level)
 uint32_t emu_vblank_start(void* arg) {
 	emu_cpu_irq(1, true);
 	hw_vblank();
-	// HACK: Force game-ready bit every VBlank so game's VBlank handler runs
+	// HACK: Force game-ready bit every VBlank so game's VBlank handler runs.
+	// Only after the game has started (game_dumped flag set by profiling code).
 	#ifdef N64
-	*(volatile uint8_t*)(0xFF10FD80ul) |= 0x80;
+	{
+		extern bool game_dumped;
+		if (game_dumped)
+			*(volatile uint8_t*)(0xFF10FD80ul) |= 0x80;
+	}
 	#endif
 	debugf("[EMU] VBlank - clock:%lld clock_frame:%lld\n", emu_clock(), emu_clock_frame());
 	return FRAME_CLOCK;
@@ -305,7 +311,7 @@ int main(int argc, char *argv[]) {
 
 		// One-time dump of game code when PC transitions from BIOS to game ROM
 		{
-			static bool game_dumped = false;
+			; // game_dumped is file-scope
 			uint32_t pc = m64k_get_pc(&m64k) & 0xFFFFFF;
 			if (!game_dumped && pc < 0xC00000 && g_frame > 100) {
 				game_dumped = true;
