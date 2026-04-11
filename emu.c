@@ -259,7 +259,6 @@ int main(int argc, char *argv[]) {
 			(float)render_time * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(float)profile_dma_load * 100.f / (float)(TICKS_PER_SECOND / 60),
 			(uint32_t)m68k_get_reg(NULL, M68K_REG_PC));
-			#endif
 		#endif
 
 		rom_next_frame();
