@@ -112,9 +112,12 @@ uint32_t read_pbrom(uint32_t addr, int sz) {
 
 uint32_t read_hwio(uint32_t addr, int sz)  {
 	if (sz == 4) {
-		// NOTE: order is important
 		uint32_t val = read_hwio(addr+0, 2) << 16;
 		return val | read_hwio(addr+2, 2);
+	}
+	if (sz == 2) {
+		/* Word read: combine two byte reads (high byte at even addr, low at odd) */
+		return (read_hwio(addr+0, 1) << 8) | read_hwio(addr+1, 1);
 	}
 
 	// Idle skip for RTC Wait Pulse in BIOS boot
@@ -157,6 +160,12 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 	if (sz == 4) {
 		write_hwio(addr+0, val>>16, 2);
 		write_hwio(addr+2, val&0xFFFF, 2);
+		return;
+	}
+	if (sz == 2) {
+		/* Word write: split into two byte writes */
+		write_hwio(addr+0, (val>>8) & 0xFF, 1);
+		write_hwio(addr+1, val & 0xFF, 1);
 		return;
 	}
 
