@@ -197,40 +197,43 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 }
 
 
-unsigned int  m68k_read_memory_8(unsigned int address) {
+// Memory access functions.
+// The fast path for P-ROM (0x0xxxxx) and WORK_RAM (0x1xxxxx) is inlined
+// in m68kinline.h. These functions handle the remaining cases.
+unsigned int m68k_read_memory_8_slow(unsigned int address) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 1);
 	if (b->mem) return *(b->mem + (address & b->mask));
 	return 0xFF;
 }
 
-unsigned int  m68k_read_memory_16(unsigned int address) {
+unsigned int m68k_read_memory_16_slow(unsigned int address) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 2);
 	if (b->mem) return BE16(*(u_uint16_t*)(b->mem + (address & b->mask)));
 	return 0xFFFF;
 }
 
-unsigned int  m68k_read_memory_32(unsigned int address) {
+unsigned int m68k_read_memory_32_slow(unsigned int address) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->r) return b->r(address, 4);
 	if (b->mem) return BE32(*(u_uint32_t*)(b->mem + (address & b->mask)));
 	return 0;
 }
 
-void m68k_write_memory_8(unsigned int address, unsigned int value) {
+void m68k_write_memory_8_slow(unsigned int address, unsigned int value) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 1); return; }
 	if (b->mem) { *(b->mem + (address & b->mask)) = value; return; }
 }
 
-void m68k_write_memory_16(unsigned int address, unsigned int value) {
+void m68k_write_memory_16_slow(unsigned int address, unsigned int value) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 2); return; }
 	if (b->mem) { *(u_uint16_t*)(b->mem + (address & b->mask)) = BE16(value); return; }
 }
 
-void m68k_write_memory_32(unsigned int address, unsigned int value) {
+void m68k_write_memory_32_slow(unsigned int address, unsigned int value) {
 	Bank *b = &banks[(address>>20)&0xF];
 	if (b->w) { b->w(address, value, 4); return; }
 	if (b->mem) { *(u_uint32_t*)(b->mem + (address & b->mask)) = BE32(value); return; }
