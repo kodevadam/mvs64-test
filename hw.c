@@ -16,11 +16,23 @@
 typedef uint16_t u_uint16_t __attribute__((aligned(1)));
 typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 
-// Z80 sound CPU stub: fake the command acknowledge protocol.
-// On real hardware, the Z80 reads the command and echoes it back
-// (with bit 7 set) via a response latch. Without a Z80 emulator,
-// we just latch the expected response immediately.
-static uint8_t z80_result = 0x01;  // initial value expected by BIOS
+// Z80 sound CPU stub: fake the command/response protocol.
+// On real hardware, the 68K writes a command byte to 0x320000 which latches
+// in the NEO-C1 and triggers a Z80 NMI. The Z80 reads the command (port $00),
+// processes it, and writes a response byte (port $0C) that the 68K can read
+// back from 0x320000.
+//
+// Protocol details (from NeoGeo dev wiki and freemlib sound driver):
+//   Command 0x01 (slot switch): Z80 echoes 0x01 back to signal readiness.
+//       BIOS polls until it reads 0x01; timeout causes "Z80 ERROR".
+//   Command 0x02 (eyecatch BGM): No reply expected, just plays music.
+//   Command 0x03 (soft reset):   Z80 clears latch to 0x00, then restarts.
+//       No reply expected by BIOS.
+//   Other commands:               Sound drivers echo cmd | 0x80 when done.
+//       68K can poll bit 7 to detect completion.
+//
+// Without a Z80 emulator, we latch the expected response immediately.
+static uint8_t z80_result = 0x01;  // Z80 "ready" value expected during BIOS boot
 
 #ifdef N64
 #define ALIGN_64K __attribute__((aligned(64*1024)))
@@ -159,13 +171,14 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1);
-			// Fake Z80 acknowledge: BIOS commands 0x01/0x03 expect exact echo;
-			// all other commands expect echo with bit 7 set.
-			if (val == 0x01 || val == 0x03)
-				z80_result = val;
+			// Fake Z80 command processing without a real Z80 CPU.
+			if (val == 0x01)
+				z80_result = 0x01;  // slot switch: echo 0x01 (BIOS polls for this)
+			else if (val == 0x03)
+				z80_result = 0x01;  // soft reset: Z80 clears to 0x00 then restarts as "ready" (0x01)
 			else
-				z80_result = val | 0x80;
-			debugf("[HWIO] Send Z80 command: %02x (ack: %02x)\n", (unsigned int)val, z80_result);
+				z80_result = val | 0x80;  // general commands: echo with bit 7 set
+			debugf("[HWIO] Send Z80 command: %02x (result: %02x)\n", (unsigned int)val, z80_result);
 			return;
 
 	} else if ((addr>>16) == 0x38) switch (addr&0xFFFF) {
