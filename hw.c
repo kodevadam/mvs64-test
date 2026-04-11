@@ -169,7 +169,6 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 				z80_result = 0x01;  // soft reset: Z80 clears to 0x00 then restarts as "ready" (0x01)
 			else
 				z80_result = val | 0x80;  // general commands: echo with bit 7 set
-			debugf("[HWIO] Send Z80 command: %02x (result: %02x)\n", (unsigned int)val, z80_result);
 			return;
 
 	} else if ((addr>>16) == 0x38) switch (addr&0xFFFF) {
