@@ -193,14 +193,6 @@ void fame_adapter_init(void) {
  */
 void fame_adapter_reset(void) {
     fm68k_reset(&fame_ctx);
-    debugf("[FAME] reset: PC=%06lx SP=%08lx SR=%04x\n",
-        (unsigned long)fame_ctx.pc, (unsigned long)fame_ctx.areg[7].D, fame_ctx.sr);
-    debugf("[FAME] Fetch[0x00]=%lx Fetch[0xC0]=%lx\n",
-        (unsigned long)fame_ctx.Fetch[0x00],
-        (unsigned long)fame_ctx.Fetch[0xC0]);
-    /* Read first opcode at PC to verify fetch works */
-    uint16_t *test_pc = (uint16_t*)(fame_ctx.Fetch[fame_ctx.pc >> 16] + fame_ctx.pc);
-    debugf("[FAME] first opcode at PC: %04x\n", *test_pc);
 }
 
 /*
@@ -208,24 +200,7 @@ void fame_adapter_reset(void) {
  * Returns the actual number of cycles consumed.
  */
 int fame_adapter_execute(int cycles) {
-    static int stuck_trace = 0;
     fame_initial_cycles = cycles;
-
-    /* Trace when stuck at 0xC00426 */
-    uint32_t pc = fame_ctx.pc & 0xFFFFFF;
-    if (pc == 0xC00426 && stuck_trace < 3) {
-        stuck_trace++;
-        uint16_t *p = (uint16_t*)(fame_ctx.Fetch[pc >> 16] + pc);
-        debugf("[FAME] STUCK pc=%06lx ops: %04x %04x %04x %04x %04x %04x\n",
-            (unsigned long)pc, p[0], p[1], p[2], p[3], p[4], p[5]);
-        debugf("[FAME] D0=%08lx D1=%08lx A0=%08lx A7=%08lx SR=%04x\n",
-            (unsigned long)fame_ctx.dreg[0].D, (unsigned long)fame_ctx.dreg[1].D,
-            (unsigned long)fame_ctx.areg[0].D, (unsigned long)fame_ctx.areg[7].D,
-            fame_ctx.sr);
-        /* Also read what the BIOS is polling via memory callback */
-        debugf("[FAME] read_word(0x300000)=%04x read_word(0x320000)=%04x\n",
-            fame_ctx.read_word(0x300000), fame_ctx.read_word(0x320000));
-    }
 
     return fm68k_emulate(&fame_ctx, cycles, fm68k_reason_emulate);
 }
