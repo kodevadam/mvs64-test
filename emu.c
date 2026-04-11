@@ -62,14 +62,9 @@ uint32_t profile_dma_load;
 static uint64_t m68k_exec(uint64_t clock) {
 	clock /= M68K_CLOCK_DIV;
 	if (clock > m68k_clock) {
-		#ifdef N64
-		// Idle-skip: if the 68K is spinning at the configured idle-skip PC,
-		// fast-forward the clock instead of emulating the busy-wait cycle by cycle.
-		if (rom_pc_idle_skip && (m68k_get_reg(NULL, M68K_REG_PC) & 0xFFFFFF) == rom_pc_idle_skip)
-			m68k_clock = clock;
-		else
-		#endif
-			m68k_clock += m68k_execute(clock - m68k_clock);
+		int ncycles = (int)(clock - m68k_clock);
+		int executed = m68k_execute(ncycles);
+		m68k_clock += executed;
 	}
 	return m68k_clock * M68K_CLOCK_DIV;
 }
