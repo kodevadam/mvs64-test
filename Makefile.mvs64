@@ -22,9 +22,8 @@ $(BUILD_DIR)/m68kops.o: CFLAGS += -O2
 endif
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(wildcard hle_*.c)
-asm += tlb_handler.S
+asm = tlb_handler.S
 rsp = rsp_video.S
-asm =
 obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.o)
 
 src_makerom = mvsmakerom.c miniz.c
