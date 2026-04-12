@@ -15,7 +15,7 @@
 #include "hw.h"
 #include "roms.h"
 
-/* Defined in tlb_handler.S */
+/* Defined in tlb_vector.S */
 extern uint32_t tlb_map[256];
 extern void tlb_handler_install(void);
 
