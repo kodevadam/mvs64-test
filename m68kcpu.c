@@ -77,7 +77,7 @@ static void m68k_init_dispatch(void) {
 /* ======================================================================== */
 
 int  m68ki_initial_cycles;
-/* m68ki_remaining_cycles is now m68ki_cpu.remaining_cycles (offset 0 in struct) */
+int  m68ki_remaining_cycles = 0;                     /* Number of clocks remaining */
 uint m68ki_tracing = 0;
 uint m68ki_address_space;
 

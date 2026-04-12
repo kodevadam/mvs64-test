@@ -925,7 +925,6 @@ typedef union
 
 typedef struct m68ki_cpu_core_s
 {
-	int  remaining_cycles; /* Cycle counter at offset 0 for minimal reload cost */
 	uint cpu_type;     /* CPU Type: 68000, 68008, 68010, 68EC020, 68020, 68EC030, 68030, 68EC040, or 68040 */
 	uint dar[16];      /* Data and Address Registers */
 	uint dar_save[16];  /* Saved Data and Address Registers (pushed onto the
@@ -1012,7 +1011,7 @@ typedef struct m68ki_cpu_core_s
 
 #ifndef M68K_RECOMPILER
 extern m68ki_cpu_core m68ki_cpu;
-#define m68ki_remaining_cycles m68ki_cpu.remaining_cycles
+extern sint           m68ki_remaining_cycles;
 #endif
 
 extern uint           m68ki_tracing;
