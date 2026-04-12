@@ -1084,8 +1084,7 @@ unsigned int m68k_get_virq(unsigned int level)
 void m68k_init(void)
 {
 #if defined(N64) && defined(USE_TLB_FETCH)
-	/* Initialize register-pinned variables before any macro access */
-	m68ki_cpu_p = &m68ki_cpu;
+	/* Initialize register-pinned cycle counter */
 	m68ki_remaining_cycles = 0;
 #endif
 
