@@ -19,6 +19,13 @@ else
 src_68k = m68kcpu.c m68kops.c
 # Musashi's generated opcode file is huge; keep at -O2
 $(BUILD_DIR)/m68kops.o: CFLAGS += -O2
+# Files that include m68kcpu.h declare global register variables, which must
+# appear before any function definition. LTO merges all TUs, breaking this
+# ordering constraint. Disable LTO for these files — the important inlining
+# (fetch, memory access) already happens within-TU via inline headers.
+$(BUILD_DIR)/m68kcpu.o: CFLAGS += -fno-lto
+$(BUILD_DIR)/m68kops.o: CFLAGS += -fno-lto
+$(BUILD_DIR)/hw.o: CFLAGS += -fno-lto
 endif
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(wildcard hle_*.c)
