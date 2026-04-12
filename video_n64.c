@@ -217,9 +217,13 @@ static void render_begin_fix(void) {
 static void render_end_fix(void) {}
 
 static void render_begin(void) {
-	data_cache_hit_writeback(PALETTE_RAM + PALETTE_RAM_BANK, 4096*2);
-	for (int i=0; i<4096 / 0x400; i++) {
-		rsp_pal_convert(PALETTE_RAM + PALETTE_RAM_BANK + i*0x400, PALETTE_RAM_EMU + i*0x400);
+	extern int palette_dirty;
+	if (palette_dirty) {
+		data_cache_hit_writeback(PALETTE_RAM + PALETTE_RAM_BANK, 4096*2);
+		for (int i=0; i<4096 / 0x400; i++) {
+			rsp_pal_convert(PALETTE_RAM + PALETTE_RAM_BANK + i*0x400, PALETTE_RAM_EMU + i*0x400);
+		}
+		palette_dirty = 0;
 	}
 
 	uint16_t bkg = color_convert(PALETTE_RAM[PALETTE_RAM_BANK+0xFFF]) | 1;

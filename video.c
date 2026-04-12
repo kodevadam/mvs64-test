@@ -48,6 +48,7 @@ static uint16_t color_convert(uint16_t val) {
 }
 
 static uint16_t PALETTE_RAM_EMU[4*1024];
+int palette_dirty = 1;  /* set when palette RAM or bank changes */
 
 #ifdef N64
 	#if 1
@@ -225,6 +226,7 @@ void video_palette_w(uint32_t address, uint32_t val, int sz) {
 	address /= 2;
 	address += PALETTE_RAM_BANK;
 	PALETTE_RAM[address] = val;
+	palette_dirty = 1;
 }
 
 uint32_t video_palette_r(uint32_t address, int sz) {

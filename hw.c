@@ -195,8 +195,8 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 	} else if ((addr>>16) == 0x3A) switch (addr&0xFFFF) {
 		case 0x03: assert(sz==1); memcpy(P_ROM, BIOS, sizeof(P_ROM_VECTOR)); return;
 		case 0x13: assert(sz==1); memcpy(P_ROM, P_ROM_VECTOR, sizeof(P_ROM_VECTOR)); return;
-		case 0x0F: assert(sz==1); PALETTE_RAM_BANK = 0x1000; return;
-		case 0x1F: assert(sz==1); PALETTE_RAM_BANK = 0x0000; return;
+		case 0x0F: assert(sz==1); PALETTE_RAM_BANK = 0x1000; { extern int palette_dirty; palette_dirty = 1; } return;
+		case 0x1F: assert(sz==1); PALETTE_RAM_BANK = 0x0000; { extern int palette_dirty; palette_dirty = 1; } return;
 		case 0x0D: assert(sz==1); banks[0xD].w = write_unk; return;
 		case 0x1D: assert(sz==1); banks[0xD].w = NULL; return;
 		case 0x0B: assert(sz==1); srom_set_bank(0); return;
