@@ -81,7 +81,14 @@ void tlb_handler_init(void) {
     tlb_handler_install();
     enable_interrupts();
 
-    debugf("[TLB] Refill handler installed at 0x80000000\n");
+    /* Verify installation by reading back from kseg1 (uncached, bypasses D-cache) */
+    volatile uint32_t *vec0 = (volatile uint32_t *)0xA0000000;
+    volatile uint32_t *vec1 = (volatile uint32_t *)0xA0000080;
+    debugf("[TLB] Vec @0x80000000: %08lx %08lx %08lx %08lx\n",
+           vec0[0], vec0[1], vec0[2], vec0[3]);
+    debugf("[TLB] Vec @0x80000080: %08lx %08lx %08lx %08lx\n",
+           vec1[0], vec1[1], vec1[2], vec1[3]);
+    debugf("[TLB] Handler installed at 0x80000000 + 0x80000080\n");
 }
 
 /**

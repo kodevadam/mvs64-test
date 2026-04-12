@@ -94,10 +94,10 @@ tlb_refill_handler_end:
  */
     .globl tlb_handler_install
 tlb_handler_install:
+    /* Install at TLB Refill vector (0x80000000) via uncached kseg1 */
     la      t0, tlb_refill_handler
     la      t1, tlb_refill_handler_end
-    li      t2, 0xA0000000      /* kseg1 (uncached) — bypasses D-cache,
-                                 * writes directly to RDRAM at phys 0x0 */
+    li      t2, 0xA0000000
 
 1:  lw      t3, 0(t0)
     sw      t3, 0(t2)
@@ -106,20 +106,34 @@ tlb_handler_install:
     bne     t0, t1, 1b
     nop
 
-    /* Invalidate any stale D-cache lines at kseg0 vector address */
+    /* Also install at XTLB Refill vector (0x80000080) — handles TLB
+     * misses when VR4300 uses 64-bit kernel addressing (KX=1).
+     * lui 0xFF00 sign-extends to 0xFFFFFFFFFF000000 on MIPS64,
+     * routing misses to the XTLB vector instead of TLB Refill. */
+    la      t0, tlb_refill_handler
+    li      t2, 0xA0000080
+
+2:  lw      t3, 0(t0)
+    sw      t3, 0(t2)
+    addiu   t0, t0, 4
+    addiu   t2, t2, 4
+    bne     t0, t1, 2b
+    nop
+
+    /* Invalidate D-cache for both vector areas */
     li      t0, 0x80000000
-    li      t1, 0x80000080
+    li      t1, 0x80000100
 3:  cache   0x11, 0(t0)        /* Hit Invalidate — D-cache (16-byte lines) */
     addiu   t0, t0, 16
     bne     t0, t1, 3b
     nop
 
-    /* Invalidate I-cache so CPU fetches fresh code from RDRAM */
+    /* Invalidate I-cache for both vector areas */
     li      t0, 0x80000000
-    li      t1, 0x80000080
-2:  cache   0x10, 0(t0)        /* Hit Invalidate — I-cache (32-byte lines) */
+    li      t1, 0x80000100
+4:  cache   0x10, 0(t0)        /* Hit Invalidate — I-cache (32-byte lines) */
     addiu   t0, t0, 32
-    bne     t0, t1, 2b
+    bne     t0, t1, 4b
     nop
 
     jr      ra
