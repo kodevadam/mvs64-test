@@ -44,9 +44,11 @@ tlb_refill_handler:
     bnez    k1, tlb_refill_passthrough
     nop
 
-    /* Index into mapping table: bits [23:16] of virtual address */
+    /* Index into mapping table: bits [23:16] of virtual address.
+     * Mask to even index (0xFE) because each TLB entry covers a PAIR
+     * of 64KB pages (128KB total). Lo0 = even page, Lo1 = odd page. */
     srl     k1, k0, 16
-    andi    k1, k1, 0xFF
+    andi    k1, k1, 0xFE
     sll     k1, k1, 2
 
     /* Load pre-built EntryLo from table */

@@ -38,6 +38,21 @@ static uint32_t make_entrylo(uint32_t phys_addr, int writable) {
     return entry;
 }
 
+/**
+ * Flush all 32 TLB entries by writing unmatchable EntryHi values.
+ * Called on bank switch to invalidate stale P2 ROM mappings.
+ */
+static void tlb_flush_all(void) {
+    for (int i = 0; i < 32; i++) {
+        C0_WRITE_INDEX(i);
+        C0_WRITE_ENTRYHI(0x80000000 | (i << 13));
+        C0_WRITE_ENTRYLO0(0);
+        C0_WRITE_ENTRYLO1(0);
+        C0_WRITE_PAGEMASK(0);
+        C0_TLBWI();
+    }
+}
+
 void tlb_handler_init(void) {
     /* Clear the mapping table */
     memset(tlb_map, 0, sizeof(uint32_t) * 256);
@@ -54,6 +69,17 @@ void tlb_handler_init(void) {
     uint32_t wram_phys = PhysicalAddr(WORK_RAM);
     tlb_map[0x10] = make_entrylo(wram_phys, 1);
 
+    /* Map banked P-ROM (P2): 68K 0x200000-0x2FFFFF (1MB = 16 x 64KB pages)
+     * Only if ROM is linearly mapped in RDRAM. Initial bank = 0. */
+    uint8_t *pb_linear = pbrom_linear();
+    if (pb_linear) {
+        uint32_t pb_phys = PhysicalAddr(pb_linear);
+        for (int i = 0; i < 16; i++) {
+            tlb_map[0x20 + i] = make_entrylo(pb_phys + i * 0x10000, 0);
+        }
+        debugf("[TLB] P2-ROM phys=0x%08lx (linear, bank 0)\n", pb_phys);
+    }
+
     /* Map BIOS: 68K 0xC00000-0xC1FFFF (128KB = 2 x 64KB pages)
      * Physical address of BIOS, read-only */
     uint32_t bios_phys = PhysicalAddr(BIOS);
@@ -65,15 +91,8 @@ void tlb_handler_init(void) {
     debugf("[TLB] Map entries: P-ROM[0]=%08lx WRAM[0x10]=%08lx BIOS[0xC0]=%08lx\n",
            tlb_map[0], tlb_map[0x10], tlb_map[0xC0]);
 
-    /* Reset all TLB entries first */
-    for (int i = 0; i < 32; i++) {
-        C0_WRITE_INDEX(i);
-        C0_WRITE_ENTRYHI(0x80000000 | (i << 13)); /* unmapped addresses */
-        C0_WRITE_ENTRYLO0(0);
-        C0_WRITE_ENTRYLO1(0);
-        C0_WRITE_PAGEMASK(0);
-        C0_TLBWI();
-    }
+    /* Reset all TLB entries */
+    tlb_flush_all();
     C0_WRITE_WIRED(0);
 
     /* Install the refill handler at the exception vector */
@@ -82,6 +101,20 @@ void tlb_handler_init(void) {
     enable_interrupts();
 
     debugf("[TLB] Refill handler installed at 0x80000000\n");
+}
+
+/**
+ * Update TLB mapping for banked P-ROM (P2) after a bank switch.
+ * Called from write_pbrom() in hw.c when the bank register changes.
+ * new_base points to the new 1MB window in the linearly-mapped ROM.
+ */
+void tlb_update_pbrom_bank(uint8_t *new_base) {
+    uint32_t pb_phys = PhysicalAddr(new_base);
+    for (int i = 0; i < 16; i++) {
+        tlb_map[0x20 + i] = make_entrylo(pb_phys + i * 0x10000, 0);
+    }
+    /* Flush all TLB entries so stale P2 mappings are evicted */
+    tlb_flush_all();
 }
 
 #endif /* USE_TLB_FETCH */

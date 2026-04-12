@@ -88,6 +88,12 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 		// If the PBROM area linearly mapped, update the mapping.
 		if (banks[0x2].mem) {
 			banks[0x2].mem = pbrom_linear() + val*0x100000;
+#if defined(N64) && defined(USE_TLB_FETCH)
+			{
+				extern void tlb_update_pbrom_bank(uint8_t *new_base);
+				tlb_update_pbrom_bank(banks[0x2].mem);
+			}
+#endif
 		}
 		return;
 	}
