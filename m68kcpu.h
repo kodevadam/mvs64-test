@@ -1011,15 +1011,7 @@ typedef struct m68ki_cpu_core_s
 
 #ifndef M68K_RECOMPILER
 extern m68ki_cpu_core m68ki_cpu;
-#if defined(N64) && defined(USE_TLB_FETCH)
-/* Pin the cycle counter to MIPS $s0 (callee-saved register $16).
- * USE_CYCLES() becomes a single addiu; the main loop condition becomes
- * bgtz — no load/store per iteration. The value survives across indirect
- * dispatch calls, eliminating reload overhead after every opcode handler. */
-register int m68ki_remaining_cycles asm("$16");  /* $s0 */
-#else
 extern sint           m68ki_remaining_cycles;
-#endif
 #endif
 
 extern uint           m68ki_tracing;

@@ -77,9 +77,7 @@ static void m68k_init_dispatch(void) {
 /* ======================================================================== */
 
 int  m68ki_initial_cycles;
-#if !(defined(N64) && defined(USE_TLB_FETCH))
 int  m68ki_remaining_cycles = 0;                     /* Number of clocks remaining */
-#endif
 uint m68ki_tracing = 0;
 uint m68ki_address_space;
 
@@ -1083,11 +1081,6 @@ unsigned int m68k_get_virq(unsigned int level)
 
 void m68k_init(void)
 {
-#if defined(N64) && defined(USE_TLB_FETCH)
-	/* Initialize register-pinned cycle counter */
-	m68ki_remaining_cycles = 0;
-#endif
-
 	/* Initialize two-level dispatch tables for cache-friendly opcode dispatch */
 	m68k_init_dispatch();
 
