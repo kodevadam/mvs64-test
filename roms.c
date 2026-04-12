@@ -396,7 +396,7 @@ void rom_next_frame(void) {
 }
 
 void rom_load_prom(const char *dir) {
-	if (!P_ROM) P_ROM = memalign(256*1024, 1024*1024);
+	if (!P_ROM) P_ROM = memalign(1024*1024, 1024*1024);
 	assertf(P_ROM, "cannot allocate P_ROM buffer");
 	rom(dir, "p.rom", 0, 0, P_ROM, P_ROM_SIZE, false);
 }

@@ -1095,13 +1095,24 @@ static inline uint m68ki_read_imm_16(void)
 	return result;
 }
 #else
-	/* Fast path: direct pointer dereference via cached PC base.
+#if defined(N64) && defined(USE_TLB_FETCH)
+	/* TLB-mapped fetch: the VR4300 TLB translates 0xFF000000+pc directly
+	 * to the correct physical RDRAM address. No base pointer, no bank
+	 * check, no address mask — the hardware does it all. */
+	{
+		uint pc = REG_PC;
+		REG_PC = pc + 2;
+		return *(uint16_t*)(0xFF000000 + pc);
+	}
+#else
+	/* Software fetch: direct pointer dereference via cached PC base.
 	 * CPU_FETCH_BASE is always valid (no NULL check needed). */
 	{
 		uint pc = REG_PC;
 		REG_PC = pc + 2;
 		return BE16(*(uint16_t*)(CPU_FETCH_BASE + (pc & CPU_ADDRESS_MASK)));
 	}
+#endif
 #endif /* M68K_EMULATE_PREFETCH */
 }
 
@@ -1145,12 +1156,21 @@ static inline uint m68ki_read_imm_32(void)
 #else
 	m68ki_set_fc(FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
 	m68ki_check_address_error(REG_PC, MODE_READ, FLAG_S | FUNCTION_CODE_USER_PROGRAM); /* auto-disable (see m68kcpu.h) */
+#if defined(N64) && defined(USE_TLB_FETCH)
+	{
+		uint pc = REG_PC;
+		REG_PC = pc + 4;
+		typedef uint32_t u_uint32_t __attribute__((aligned(1)));
+		return *(u_uint32_t*)(0xFF000000 + pc);
+	}
+#else
 	{
 		uint pc = REG_PC;
 		REG_PC = pc + 4;
 		typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 		return BE32(*(u_uint32_t*)(CPU_FETCH_BASE + (pc & CPU_ADDRESS_MASK)));
 	}
+#endif
 #endif /* M68K_EMULATE_PREFETCH */
 }
 #endif /* M68K_RECOMPILER */
@@ -1502,7 +1522,9 @@ static inline void m68ki_fake_pull_32(void)
 static inline void m68ki_jump(uint new_pc)
 {
 	REG_PC = new_pc;
+#if !(defined(N64) && defined(USE_TLB_FETCH))
 	m68ki_update_fetch_base();
+#endif
 	m68ki_pc_changed(REG_PC);
 }
 
@@ -1510,7 +1532,9 @@ static inline void m68ki_jump_vector(uint vector)
 {
 	REG_PC = (vector<<2) + REG_VBR;
 	REG_PC = m68ki_read_data_32(REG_PC);
+#if !(defined(N64) && defined(USE_TLB_FETCH))
 	m68ki_update_fetch_base();
+#endif
 	m68ki_pc_changed(REG_PC);
 }
 
@@ -1537,7 +1561,9 @@ static inline void m68ki_branch_16(uint offset)
 static inline void m68ki_branch_32(uint offset)
 {
 	REG_PC += offset;
+#if !(defined(N64) && defined(USE_TLB_FETCH))
 	m68ki_update_fetch_base();
+#endif
 	m68ki_pc_changed(REG_PC);
 	if (m68k_check_idle_skip(REG_PC))
 		m68k_consume_timeslice();

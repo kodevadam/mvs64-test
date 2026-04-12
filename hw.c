@@ -34,13 +34,15 @@ typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 static uint8_t z80_result = 0x01;  // Z80 "ready" value expected during BIOS boot
 
 #ifdef N64
-#define ALIGN_64K __attribute__((aligned(64*1024)))
+#define ALIGN_64K  __attribute__((aligned(64*1024)))
+#define ALIGN_128K __attribute__((aligned(128*1024)))
 #else
 #define ALIGN_64K
+#define ALIGN_128K
 #endif
 
 uint8_t P_ROM_VECTOR[0x80];
-uint8_t BIOS[128*1024];
+uint8_t BIOS[128*1024] ALIGN_128K;
 uint8_t WORK_RAM[64*1024] ALIGN_64K;
 uint8_t BACKUP_RAM[64*1024] ALIGN_64K;
 uint16_t PALETTE_RAM[8*1024];  // two banks
@@ -298,8 +300,28 @@ void hw_init(void) {
 	banks[0xC] = (Bank){ BIOS,             0x1FFFF,   NULL,            write_unk };
 	banks[0xD] = (Bank){ BACKUP_RAM,       0x0FFFF,   NULL,            write_unk };
 
-	// NOTE: m64k TLB memory mapping and custom exception vectors removed.
-	// Musashi uses the bank-based m68k_read/write_memory callbacks above.
+	/* Set up TLB mappings for the 68K address space.
+	 * Maps 68K addresses into virtual range 0xFF000000-0xFFFFFFFF so that
+	 * instruction fetches can use direct pointer dereference through TLB
+	 * instead of software bank-check dispatch.
+	 * Data reads/writes to unmapped regions (HWIO, palette) still go
+	 * through the bank-based callback path above. */
+#if defined(N64) && defined(USE_TLB_FETCH)
+	{
+		#include "m64k/tlb.h"
+		// P-ROM: 68K 0x000000-0x0FFFFF (1MB, read-only)
+		__m64k_tlb_add((void*)0xFF000000, 0x0FFFFF,
+			PhysicalAddr(P_ROM), TLBF_READONLY | TLBF_OVERWRITE);
+		// WORK_RAM: 68K 0x100000-0x10FFFF (64KB, read-write)
+		__m64k_tlb_add((void*)0xFF100000, 0x00FFFF,
+			PhysicalAddr(WORK_RAM), TLBF_OVERWRITE);
+		// BIOS: 68K 0xC00000-0xC1FFFF (128KB, read-only)
+		__m64k_tlb_add((void*)0xFFC00000, 0x01FFFF,
+			PhysicalAddr(BIOS), TLBF_READONLY | TLBF_OVERWRITE);
+
+		debugf("[HW] TLB mappings installed: P-ROM, WORK_RAM, BIOS\n");
+	}
+#endif
 
 	rtc_init_();
 	watchdog_init();
