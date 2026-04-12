@@ -24,12 +24,18 @@ void m68k_write_memory_32_slow(unsigned int address, unsigned int value);
 // we eliminate the bank table lookup, function pointer check, and call overhead
 // for ~80% of all memory accesses.
 
+// Inline fast-path data memory access.
+// With the PC base pointer handling instruction fetches, these functions
+// are now primarily used for DATA reads/writes. WORK_RAM (bank 1) is
+// checked first since it's the most common data access target during
+// gameplay. P-ROM (bank 0) is second for table/constant lookups.
+
 static inline unsigned int m68k_read_memory_16(unsigned int address) {
 	unsigned int bank = (address >> 20) & 0xF;
+	if (__builtin_expect(bank == 1, 1))
+		return BE16(*(uint16_t*)(WORK_RAM + (address & 0xFFFF)));
 	if (bank == 0)
 		return BE16(*(uint16_t*)(P_ROM + (address & 0xFFFFF)));
-	if (bank == 1)
-		return BE16(*(uint16_t*)(WORK_RAM + (address & 0xFFFF)));
 	if (bank == 0xC)
 		return BE16(*(uint16_t*)(BIOS + (address & 0x1FFFF)));
 	return m68k_read_memory_16_slow(address);
@@ -37,10 +43,10 @@ static inline unsigned int m68k_read_memory_16(unsigned int address) {
 
 static inline unsigned int m68k_read_memory_8(unsigned int address) {
 	unsigned int bank = (address >> 20) & 0xF;
+	if (__builtin_expect(bank == 1, 1))
+		return *(uint8_t*)(WORK_RAM + (address & 0xFFFF));
 	if (bank == 0)
 		return *(uint8_t*)(P_ROM + (address & 0xFFFFF));
-	if (bank == 1)
-		return *(uint8_t*)(WORK_RAM + (address & 0xFFFF));
 	if (bank == 0xC)
 		return *(uint8_t*)(BIOS + (address & 0x1FFFF));
 	return m68k_read_memory_8_slow(address);
@@ -48,18 +54,17 @@ static inline unsigned int m68k_read_memory_8(unsigned int address) {
 
 static inline unsigned int m68k_read_memory_32(unsigned int address) {
 	unsigned int bank = (address >> 20) & 0xF;
+	if (__builtin_expect(bank == 1, 1))
+		return BE32(*(u_uint32_t*)(WORK_RAM + (address & 0xFFFF)));
 	if (bank == 0)
 		return BE32(*(u_uint32_t*)(P_ROM + (address & 0xFFFFF)));
-	if (bank == 1)
-		return BE32(*(u_uint32_t*)(WORK_RAM + (address & 0xFFFF)));
 	if (bank == 0xC)
 		return BE32(*(u_uint32_t*)(BIOS + (address & 0x1FFFF)));
 	return m68k_read_memory_32_slow(address);
 }
 
 static inline void m68k_write_memory_8(unsigned int address, unsigned int value) {
-	unsigned int bank = (address >> 20) & 0xF;
-	if (bank == 1) {
+	if (__builtin_expect(((address >> 20) & 0xF) == 1, 1)) {
 		*(uint8_t*)(WORK_RAM + (address & 0xFFFF)) = value;
 		return;
 	}
@@ -67,8 +72,7 @@ static inline void m68k_write_memory_8(unsigned int address, unsigned int value)
 }
 
 static inline void m68k_write_memory_16(unsigned int address, unsigned int value) {
-	unsigned int bank = (address >> 20) & 0xF;
-	if (bank == 1) {
+	if (__builtin_expect(((address >> 20) & 0xF) == 1, 1)) {
 		*(uint16_t*)(WORK_RAM + (address & 0xFFFF)) = BE16(value);
 		return;
 	}
@@ -76,8 +80,7 @@ static inline void m68k_write_memory_16(unsigned int address, unsigned int value
 }
 
 static inline void m68k_write_memory_32(unsigned int address, unsigned int value) {
-	unsigned int bank = (address >> 20) & 0xF;
-	if (bank == 1) {
+	if (__builtin_expect(((address >> 20) & 0xF) == 1, 1)) {
 		*(u_uint32_t*)(WORK_RAM + (address & 0xFFFF)) = BE32(value);
 		return;
 	}
