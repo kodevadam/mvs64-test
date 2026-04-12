@@ -19,10 +19,6 @@ else
 src_68k = m68kcpu.c m68kops.c
 # Musashi's generated opcode file is huge; keep at -O2
 $(BUILD_DIR)/m68kops.o: CFLAGS += -O2
-# Exclude 68K core from LTO: the register-pinned cycle counter (s5) must
-# not leak into non-emulator code via LTO's cross-unit optimization.
-$(BUILD_DIR)/m68kcpu.o: CFLAGS += -fno-lto
-$(BUILD_DIR)/m68kops.o: CFLAGS += -fno-lto
 endif
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c $(src_68k) $(wildcard hle_*.c)
