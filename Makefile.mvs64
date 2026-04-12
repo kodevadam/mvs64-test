@@ -21,7 +21,8 @@ src_68k = m68kcpu.c m68kops.c
 $(BUILD_DIR)/m68kops.o: CFLAGS += -O2
 endif
 
-src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c m64k/tlb.c $(src_68k) $(wildcard hle_*.c)
+src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(wildcard hle_*.c)
+asm += tlb_handler.S
 rsp = rsp_video.S
 asm =
 obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.o)
@@ -29,9 +30,7 @@ obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_
 src_makerom = mvsmakerom.c miniz.c
 obj_makerom = $(src_makerom:%.c=$(BUILD_DIR)/%.o)
 
-CFLAGS += -Wno-unused-function -O3 -flto -fomit-frame-pointer -finline-limit=300 -funroll-loops
-# Uncomment to enable TLB-mapped instruction fetch (requires TLB miss handler)
-# CFLAGS += -DUSE_TLB_FETCH
+CFLAGS += -Wno-unused-function -O3 -flto -fomit-frame-pointer -finline-limit=300 -funroll-loops -DUSE_TLB_FETCH
 LDFLAGS += -flto
 
 ROMNAME=$(notdir $(basename $(ROM)))
