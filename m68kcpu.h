@@ -1065,8 +1065,8 @@ static inline void m68ki_update_fetch_base(void)
 	uint bank = (pc >> 20) & 0xF;
 	switch (bank) {
 	case 0x0: CPU_FETCH_BASE = P_ROM; break;
-	case 0x1: CPU_FETCH_BASE = WORK_RAM - 0x100000; break;
-	case 0xC: CPU_FETCH_BASE = BIOS - 0xC00000; break;
+	case 0x1: CPU_FETCH_BASE = (uint8*)((uintptr_t)WORK_RAM - 0x100000); break;
+	case 0xC: CPU_FETCH_BASE = (uint8*)((uintptr_t)BIOS - 0xC00000); break;
 	default:  CPU_FETCH_BASE = P_ROM; break; /* unmapped: safe fallback */
 	}
 }
