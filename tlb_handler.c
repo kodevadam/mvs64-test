@@ -21,12 +21,7 @@ extern void tlb_handler_install(void);
 
 /**
  * Build an EntryLo value for a given physical address.
- * EntryLo format: [PFN(29:6)] [C(5:3)] [D(2)] [V(1)] [G(0)]
- *   PFN = physical_address >> 12, shifted to bits [29:6]
- *   C = cache algorithm (3 = cached)
- *   D = dirty (writable)
- *   V = valid
- *   G = global
+ * EntryLo format: [PFN(25:6)] [C(5:3)] [D(2)] [V(1)] [G(0)]
  */
 static uint32_t make_entrylo(uint32_t phys_addr, int writable) {
     uint32_t entry = (phys_addr >> 6) & 0x03FFFFC0;  /* PFN at bits [25:6] */
@@ -40,7 +35,6 @@ static uint32_t make_entrylo(uint32_t phys_addr, int writable) {
 
 /**
  * Flush all 32 TLB entries by writing unmatchable EntryHi values.
- * Called on bank switch to invalidate stale P2 ROM mappings.
  */
 static void tlb_flush_all(void) {
     for (int i = 0; i < 32; i++) {
@@ -53,43 +47,30 @@ static void tlb_flush_all(void) {
     }
 }
 
-void tlb_handler_init(void) {
-    /* Clear the mapping table */
-    memset(tlb_map, 0, sizeof(uint32_t) * 256);
-
-    /* Map P-ROM: 68K 0x000000-0x0FFFFF (1MB = 16 x 64KB pages)
-     * Physical address of P_ROM, read-only */
-    uint32_t prom_phys = PhysicalAddr(P_ROM);
+/**
+ * Map one 68K megabyte bank (16 x 64KB pages) into tlb_map[].
+ * Handles mirroring: offset wraps with (i * 0x10000) & mask.
+ * bank_num: 0x0-0xF (68K address bits [23:20])
+ */
+void tlb_map_bank(int bank_num, uint8_t *mem, uint32_t mask, int writable) {
+    if (!mem) return;
+    uint32_t phys_base = PhysicalAddr(mem);
+    int base_idx = bank_num * 16;
     for (int i = 0; i < 16; i++) {
-        tlb_map[i] = make_entrylo(prom_phys + i * 0x10000, 0);
+        uint32_t offset = (i * 0x10000) & mask;
+        tlb_map[base_idx + i] = make_entrylo(phys_base + offset, writable);
     }
+}
 
-    /* Map WORK_RAM: 68K 0x100000-0x10FFFF (64KB = 1 x 64KB page)
-     * Physical address of WORK_RAM, read-write */
-    uint32_t wram_phys = PhysicalAddr(WORK_RAM);
-    tlb_map[0x10] = make_entrylo(wram_phys, 1);
+/**
+ * Clear one 68K megabyte bank in tlb_map[].
+ */
+void tlb_unmap_bank(int bank_num) {
+    memset(&tlb_map[bank_num * 16], 0, 16 * sizeof(uint32_t));
+}
 
-    /* Map banked P-ROM (P2): 68K 0x200000-0x2FFFFF (1MB = 16 x 64KB pages)
-     * Only if ROM is linearly mapped in RDRAM. Initial bank = 0. */
-    uint8_t *pb_linear = pbrom_linear();
-    if (pb_linear) {
-        uint32_t pb_phys = PhysicalAddr(pb_linear);
-        for (int i = 0; i < 16; i++) {
-            tlb_map[0x20 + i] = make_entrylo(pb_phys + i * 0x10000, 0);
-        }
-        debugf("[TLB] P2-ROM phys=0x%08lx (linear, bank 0)\n", pb_phys);
-    }
-
-    /* Map BIOS: 68K 0xC00000-0xC1FFFF (128KB = 2 x 64KB pages)
-     * Physical address of BIOS, read-only */
-    uint32_t bios_phys = PhysicalAddr(BIOS);
-    tlb_map[0xC0] = make_entrylo(bios_phys, 0);
-    tlb_map[0xC1] = make_entrylo(bios_phys + 0x10000, 0);
-
-    debugf("[TLB] P-ROM phys=0x%08lx WORK_RAM phys=0x%08lx BIOS phys=0x%08lx\n",
-           prom_phys, wram_phys, bios_phys);
-    debugf("[TLB] Map entries: P-ROM[0]=%08lx WRAM[0x10]=%08lx BIOS[0xC0]=%08lx\n",
-           tlb_map[0], tlb_map[0x10], tlb_map[0xC0]);
+void tlb_handler_init(void) {
+    memset(tlb_map, 0, sizeof(uint32_t) * 256);
 
     /* Reset all TLB entries */
     tlb_flush_all();
@@ -104,16 +85,9 @@ void tlb_handler_init(void) {
 }
 
 /**
- * Update TLB mapping for banked P-ROM (P2) after a bank switch.
- * Called from write_pbrom() in hw.c when the bank register changes.
- * new_base points to the new 1MB window in the linearly-mapped ROM.
+ * Flush TLB hardware entries after mapping changes (e.g. bank switch).
  */
-void tlb_update_pbrom_bank(uint8_t *new_base) {
-    uint32_t pb_phys = PhysicalAddr(new_base);
-    for (int i = 0; i < 16; i++) {
-        tlb_map[0x20 + i] = make_entrylo(pb_phys + i * 0x10000, 0);
-    }
-    /* Flush all TLB entries so stale P2 mappings are evicted */
+void tlb_flush(void) {
     tlb_flush_all();
 }
 

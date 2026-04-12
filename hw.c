@@ -90,8 +90,10 @@ void write_pbrom(uint32_t addr, uint32_t val, int sz) {
 			banks[0x2].mem = pbrom_linear() + val*0x100000;
 #if defined(N64) && defined(USE_TLB_FETCH)
 			{
-				extern void tlb_update_pbrom_bank(uint8_t *new_base);
-				tlb_update_pbrom_bank(banks[0x2].mem);
+				extern void tlb_map_bank(int bank_num, uint8_t *mem, uint32_t mask, int writable);
+				extern void tlb_flush(void);
+				tlb_map_bank(0x2, banks[0x2].mem, 0xFFFFF, 0);
+				tlb_flush();
 			}
 #endif
 		}
@@ -309,7 +311,18 @@ void hw_init(void) {
 #if defined(N64) && defined(USE_TLB_FETCH)
 	{
 		extern void tlb_handler_init(void);
+		extern void tlb_map_bank(int bank_num, uint8_t *mem, uint32_t mask, int writable);
 		tlb_handler_init();
+		/* Auto-map every memory-backed bank into the TLB table.
+		 * Mirrors are handled automatically via (offset & mask). */
+		for (int i = 0; i < 16; i++) {
+			if (banks[i].mem)
+				tlb_map_bank(i, banks[i].mem, banks[i].mask, banks[i].w != write_unk);
+		}
+		debugf("[TLB] Mapped banks:");
+		for (int i = 0; i < 16; i++)
+			if (banks[i].mem) debugf(" %X", i);
+		debugf("\n");
 	}
 #endif
 

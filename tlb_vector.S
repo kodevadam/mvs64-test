@@ -5,6 +5,11 @@
  * address space. This handler is installed at the TLB Refill vector
  * (0x80000000) and installs TLB entries on-demand from a pre-built
  * mapping table.
+ *
+ * Each TLB entry covers 128KB (two 64KB pages). The handler always
+ * indexes by the even page of the pair, loading Lo0 and Lo1 from
+ * adjacent tlb_map[] entries. This correctly handles mirrored regions
+ * (e.g. WORK_RAM mirroring every 64KB).
  */
 
     .set noreorder
@@ -32,7 +37,7 @@ tlb_map:
 /**
  * TLB Refill handler — installed at exception vector 0x80000000.
  * Uses only k0/k1 (kernel temporaries).
- * Fast path: ~12 instructions for a mapped region.
+ * Fast path: ~14 instructions for a mapped region.
  */
     .globl tlb_refill_handler
 tlb_refill_handler:
@@ -44,32 +49,31 @@ tlb_refill_handler:
     bnez    k1, tlb_refill_passthrough
     nop
 
-    /* Index into mapping table: bits [23:16] of virtual address.
-     * Mask to even index (0xFE) because each TLB entry covers a PAIR
-     * of 64KB pages (128KB total). Lo0 = even page, Lo1 = odd page. */
+    /* Set PageMask for 64KB pages early (frees k0/k1 for table load) */
+    lui     k1, 0x0001
+    ori     k1, k1, 0xE000
+    mtc0    k1, $5              /* C0_PAGEMASK */
+
+    /* Index into mapping table: bits [23:16], masked to even (0xFE)
+     * because each TLB entry covers a PAIR of 64KB pages. */
     srl     k1, k0, 16
     andi    k1, k1, 0xFE
     sll     k1, k1, 2
 
-    /* Load pre-built EntryLo from table */
+    /* Load both Lo0 and Lo1 from adjacent table entries */
     lui     k0, %hi(tlb_map)
     addiu   k0, k0, %lo(tlb_map)
     addu    k0, k0, k1
-    lw      k1, 0(k0)
+    lw      k1, 0(k0)          /* Lo0 = even page */
+    lw      k0, 4(k0)          /* Lo1 = odd page */
 
-    /* Unmapped if zero */
+    /* Unmapped if Lo0 is zero */
     beqz    k1, tlb_refill_passthrough
     nop
 
-    /* Set PageMask for 64KB pages */
-    lui     k0, 0x0001
-    ori     k0, k0, 0xE000
-    mtc0    k0, $5              /* C0_PAGEMASK */
-
-    /* Install entry: Lo0 = this page, Lo1 = next 64KB page */
+    /* Install the TLB entry */
     mtc0    k1, $2              /* C0_ENTRYLO0 */
-    addiu   k1, k1, 0x400      /* PFN += 64KB (0x10000 >> 6) */
-    mtc0    k1, $3              /* C0_ENTRYLO1 */
+    mtc0    k0, $3              /* C0_ENTRYLO1 */
 
     tlbwr
     eret
