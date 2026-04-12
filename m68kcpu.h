@@ -1011,7 +1011,11 @@ typedef struct m68ki_cpu_core_s
 
 #ifndef M68K_RECOMPILER
 extern m68ki_cpu_core m68ki_cpu;
+#ifdef N64
+register int m68ki_remaining_cycles asm("s5");
+#else
 extern sint           m68ki_remaining_cycles;
+#endif
 #endif
 
 extern uint           m68ki_tracing;

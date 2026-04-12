@@ -77,7 +77,17 @@ static void m68k_init_dispatch(void) {
 /* ======================================================================== */
 
 int  m68ki_initial_cycles;
-int  m68ki_remaining_cycles = 0;                     /* Number of clocks remaining */
+/* Pin the cycle counter to a callee-saved register for zero-cost access.
+ * This is the single most frequently accessed variable in the emulator:
+ * every instruction does USE_CYCLES(N) and the loop checks GET_CYCLES().
+ * Pinning to s5 eliminates a memory load/store on every access.
+ * Safe because: MIPS calling convention preserves s-registers across calls,
+ * and N64 interrupt handlers save all GPRs. */
+#ifdef N64
+register int m68ki_remaining_cycles asm("s5");
+#else
+int m68ki_remaining_cycles = 0;
+#endif
 uint m68ki_tracing = 0;
 uint m68ki_address_space;
 
