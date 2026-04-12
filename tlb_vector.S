@@ -96,7 +96,8 @@ tlb_refill_handler_end:
 tlb_handler_install:
     la      t0, tlb_refill_handler
     la      t1, tlb_refill_handler_end
-    li      t2, 0x80000000
+    li      t2, 0xA0000000      /* kseg1 (uncached) — bypasses D-cache,
+                                 * writes directly to RDRAM at phys 0x0 */
 
 1:  lw      t3, 0(t0)
     sw      t3, 0(t2)
@@ -105,10 +106,18 @@ tlb_handler_install:
     bne     t0, t1, 1b
     nop
 
-    /* Flush I-cache for the vector area */
+    /* Invalidate any stale D-cache lines at kseg0 vector address */
     li      t0, 0x80000000
     li      t1, 0x80000080
-2:  cache   0x10, 0(t0)
+3:  cache   0x11, 0(t0)        /* Hit Invalidate — D-cache (16-byte lines) */
+    addiu   t0, t0, 16
+    bne     t0, t1, 3b
+    nop
+
+    /* Invalidate I-cache so CPU fetches fresh code from RDRAM */
+    li      t0, 0x80000000
+    li      t1, 0x80000080
+2:  cache   0x10, 0(t0)        /* Hit Invalidate — I-cache (32-byte lines) */
     addiu   t0, t0, 32
     bne     t0, t1, 2b
     nop
