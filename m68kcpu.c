@@ -51,7 +51,6 @@ extern void m68ki_build_opcode_table(void);
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef USE_THREADED_DISPATCH
 /* Two-level opcode dispatch for cache efficiency.
  * The flat 256KB jump table (65536 x 4-byte pointers) thrashes the VR4300's
  * 16KB D-cache. By splitting it into 256 separately-allocated 1KB sub-tables,
@@ -69,11 +68,6 @@ static void m68k_init_dispatch(void) {
 		       256 * sizeof(m68k_handler_t));
 	}
 }
-#else
-/* Threaded-dispatch mode: m68k_execute() lives in m68kops.c and uses a
- * computed-goto dispatch table instead of the two-level indirect call. */
-static inline void m68k_init_dispatch(void) {}
-#endif
 
 // #include "m68kfpu.c"
 // #include "m68kmmu.h" // uses some functions from m68kfpu.c which are static !
@@ -966,7 +960,6 @@ void m68k_set_cpu_type(unsigned int cpu_type)
 	}
 }
 
-#ifndef USE_THREADED_DISPATCH
 /* Execute some instructions until we use up num_cycles clock cycles */
 /* ASG: removed per-instruction interrupt checks */
 int m68k_execute(int num_cycles)
@@ -1018,7 +1011,6 @@ int m68k_execute(int num_cycles)
 	SET_CYCLES(0);
 	return spent_cycles;
 }
-#endif /* !USE_THREADED_DISPATCH */
 
 
 int m68k_cycles_run(void)

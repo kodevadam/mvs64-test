@@ -17,13 +17,8 @@ CFLAGS += -DUSE_FAME -I.
 $(BUILD_DIR)/cpu/fame/famec.o: CFLAGS += -g0 -O2 -fno-expensive-optimizations
 else
 src_68k = m68kcpu.c m68kops.c
-# Musashi's generated opcode file is huge; keep at -O2.
-# With threaded dispatch the file becomes a single ~40k-line function;
-# -fno-lto on just this TU keeps GCC's register allocator manageable.
-$(BUILD_DIR)/m68kops.o: CFLAGS += -O2 -fno-lto
-# Computed-goto (threaded) dispatch eliminates the two-level indirect call,
-# letting GCC keep hot values in registers across dispatch boundaries.
-CFLAGS += -DUSE_THREADED_DISPATCH
+# Musashi's generated opcode file is huge; keep at -O2
+$(BUILD_DIR)/m68kops.o: CFLAGS += -O2
 endif
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(wildcard hle_*.c)
