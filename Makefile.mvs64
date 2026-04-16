@@ -28,10 +28,14 @@ endif
 # the interpreter dispatch.
 #
 # PCs are picked from PROFILE samples during Blazing Star play.  The list
-# below targets the single dominant PC (0x43fe — a tight loop that ~90% of
-# profile samples hit) plus a handful of secondary hotspots from heavy and
-# light scene clusters.  Expect the HLE_PCS list to shift whenever the
-# gameplay region changes; re-profile after significant perf work.
+# below targets a handful of secondary hotspots from heavy and light scene
+# clusters.  Expect the HLE_PCS list to shift whenever the gameplay region
+# changes; re-profile after significant perf work.
+#
+# The dominant idle PC (0x43fe — ~90% of profile samples) is intentionally
+# absent: it's handled by the idle-skip check in m68k_run() instead, which
+# burns the remaining timeslice in O(1) rather than executing the busy-wait
+# loop in C.  See game.ini line for blazstar in mvsmakerom.c.
 ifdef USE_HLE
 # Hot PCs across the scene-type regions identified by profiling.
 # IMPORTANT: keep this list small.  Each generated hle_*.c contributes a
@@ -40,11 +44,10 @@ ifdef USE_HLE
 # past that and crashed on boot ("cannot allocate PBROM buffer").  Cap at
 # ~8 entries unless you've verified the game's memory headroom first.
 #
-#   idle/wait : 43fe
 #   light     : 5cba 5b50
 #   heavy     : 5152 522e 5382 53d2
 #   misc      : 5a26
-HLE_PCS = 43fe 5cba 5b50 5152 522e 5382 53d2 5a26
+HLE_PCS = 5cba 5b50 5152 522e 5382 53d2 5a26
 HLE_GEN_C = $(patsubst %,hle_%.c,$(HLE_PCS)) hle_index.c
 HLE_GEN_H = hle_index.h
 HLE_ALL   = $(HLE_GEN_C) $(HLE_GEN_H)
