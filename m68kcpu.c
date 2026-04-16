@@ -996,16 +996,6 @@ int m68k_execute(int num_cycles)
 		/* Main loop.  Keep going until we run out of clock cycles. */
 		do
 		{
-			/* Idle-skip check.  Must come BEFORE the HLE dispatch: HLE'd
-			 * busy-wait loops will spin in C using local gotos and never
-			 * return to this loop until they exit naturally, defeating the
-			 * skip.  Catching the idle PC here lets us burn the rest of
-			 * the timeslice immediately.  The branch macros in m68kcpu.h
-			 * also call this — that path covers PCs reached without HLE. */
-			if (REG_PC == rom_pc_idle_skip) {
-				m68k_consume_timeslice();
-				break;
-			}
 #ifdef USE_HLE
 			/* Check for AOT-recompiled function at current PC.  When found,
 			 * call it and let it run until it returns (either naturally via
