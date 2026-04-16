@@ -232,7 +232,7 @@ pal_loop:
     .data
     .align 4
 FIX_SPRITE_LOAD:
-    .quad RdpSyncPipe()
+    .quad 0                           # was RdpSyncPipe(); see note at cmd_sprite_draw
     .quad RdpSyncLoad()
     .quad RdpSyncTile()
     .quad RdpSetTexImage(RDP_TILE_FORMAT_INDEX, RDP_TILE_SIZE_8BIT, 0, 4)
@@ -370,8 +370,17 @@ fix_draw:
     .data
 
     .align 4
+    # SyncPipe intentionally dropped: sprite draw doesn't change pipeline
+    # state (combiner, blender, other-modes) — those are configured once
+    # in cmd_sprite_begin and never touched per-sprite.  Dropping SyncPipe
+    # saves a pipeline drain per sprite (~380 sprites/frame in heavy
+    # scenes).  SyncTile/SyncLoad are retained because we DO re-use tile
+    # descriptors and re-load TMEM every sprite.
+    # The slot is kept as .quad 0 (RDP NOOP) so the template stays the same
+    # byte length — cmd_sprite_draw copies fixed 16-byte chunks via lqv/sqv
+    # and patches at fixed offsets (3*8+4, 5*8+5).
 RDP_SPRITE_DRAW:
-    .quad RdpSyncPipe()
+    .quad 0                           # was RdpSyncPipe()
     .quad RdpSyncTile()
     .quad RdpSyncLoad()
     .quad RdpSetTexImage(RDP_TILE_FORMAT_RGBA, RDP_TILE_SIZE_16BIT, 0, 4)
@@ -384,7 +393,7 @@ RDP_SPRITE_DRAW:
 
     .align 4
 RDP_SPRITE_LOAD_PALETTE:
-    .quad RdpSyncPipe()
+    .quad 0                           # was RdpSyncPipe(); see note above
     .quad RdpSyncLoad()
     .quad RdpSyncTile()
     .quad RdpSetTexImage(RDP_TILE_FORMAT_RGBA, RDP_TILE_SIZE_16BIT, 0, 16)
