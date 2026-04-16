@@ -45,9 +45,9 @@ ifdef USE_HLE
 # ~8 entries unless you've verified the game's memory headroom first.
 #
 #   light     : 5cba 5b50
-#   heavy     : 5152 522e 5382 53d2
+#   heavy     : 5152 522e 5382 53d2 5866
 #   misc      : 5a26
-HLE_PCS = 5cba 5b50 5152 522e 5382 53d2 5a26
+HLE_PCS = 5cba 5b50 5152 522e 5382 53d2 5a26 5866
 HLE_GEN_C = $(patsubst %,hle_%.c,$(HLE_PCS)) hle_index.c
 HLE_GEN_H = hle_index.h
 HLE_ALL   = $(HLE_GEN_C) $(HLE_GEN_H)
