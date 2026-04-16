@@ -25,10 +25,15 @@ endif
 # invokes ./genhle against the byteswapped P-ROM + BIOS to emit one hle_<pc>.c
 # per listed entry address plus a perfect-hash lookup table (hle_index.[ch]).
 # m68k_execute() then checks hle_get_func(REG_PC) before falling through to
-# the interpreter dispatch.  Entries here were picked from PROFILE samples —
-# the most frequently sampled PCs during Blazing Star play.
+# the interpreter dispatch.
+#
+# PCs are picked from PROFILE samples during Blazing Star play.  The list
+# below targets the single dominant PC (0x43fe — a tight loop that ~90% of
+# profile samples hit) plus a handful of secondary hotspots from heavy and
+# light scene clusters.  Expect the HLE_PCS list to shift whenever the
+# gameplay region changes; re-profile after significant perf work.
 ifdef USE_HLE
-HLE_PCS = 522e 527e 526a 53d2 5a26
+HLE_PCS = 43fe 5a26 5986 59ec 5cba
 HLE_GEN_C = $(patsubst %,hle_%.c,$(HLE_PCS)) hle_index.c
 HLE_GEN_H = hle_index.h
 HLE_ALL   = $(HLE_GEN_C) $(HLE_GEN_H)
