@@ -6,6 +6,93 @@ subsystem and roughly ordered by expected impact.
 
 ---
 
+## Empirical Findings (April 2026)
+
+Several CPU-side optimization attempts were measured on real hardware running
+Blazing Star, with the existing PROFILE instrumentation. The findings below
+should inform any future CPU work.
+
+### What worked: profile-guided AOT (item 1.3)
+
+Wiring `genhle` into the build and selecting hot 68K function entry points
+from PROFILE samples produced the first durable, regression-free speedup:
+
+| Metric | Baseline interpreter | With HLE (8 PCs) | Δ |
+|---|---|---|---|
+| Floor FPS | 41 | 42 | +2% |
+| Median FPS | ~43 | ~47.5 | +10% |
+| Average FPS | ~42.5 | ~48 | +13% |
+| Peak FPS | 45 | 59.2 | +30% |
+
+Critically, **variance stayed healthy** — no scenes regressed, unlike earlier
+attempts. The win is consistent across light, medium, and heavy scenes.
+
+How it works: `m68k_execute()` now checks `hle_get_func(REG_PC)` before each
+interpreter dispatch (`m68kcpu.c:1000`).  When the PC matches a recompiled
+function, control transfers to native code that operates on the CPU state
+through restricted pointers, then returns the next PC to resume from.  Exits
+back to the interpreter on subroutine calls or out-of-function jumps.
+
+Required fixes to genhle to make it production-viable:
+1. Strip leading `USE_CYCLES(...)` from the pasted handler body — genhle was
+   double-counting cycles, causing the emulated CPU to run at ~half speed.
+2. Convert unsatisfied forward-jump targets into bail-to-interpreter stubs
+   instead of panicking.  Real 68K functions frequently branch outside their
+   "natural" body and the recompiler must degrade gracefully.
+
+### What did NOT work: interpreter micro-optimizations
+
+Four separate attempts to reduce per-instruction interpreter overhead were
+measured and reverted:
+
+1. **Pin hot variables to MIPS callee-saved registers via `register int x asm()`**
+   Failed: GCC 14.2.0 + mips64-elf + LTO has multiple incompatibilities with
+   global register variables.  Symptoms ranged from compile errors ("global
+   register variable follows a function definition") to subtle runtime
+   corruption (NULL pointer dereferences in unrelated TUs because `-ffixed-16`
+   broke register allocation across LTO-merged TUs).
+
+2. **Embed cycle counter as offset 0 of `m68ki_cpu` struct**
+   Theory: GCC could share one base-address load between cycle counter and
+   other CPU fields after each dispatch call.  Result: ~20% CPU regression
+   (skip frames went from 95-108% to 114-131%).  GCC was apparently already
+   keeping the standalone global in a callee-saved register; wrapping it in
+   a struct member defeated that optimization.
+
+3. **Computed-goto (threaded) dispatch with function calls retained**
+   The "hybrid" approach: replace the two-level indirect call table with a
+   computed-goto dispatch, but still call the existing handler functions from
+   each label.  Result: improved best-case scenes (54 FPS peak) but regressed
+   worst-case (34 FPS floor), with **doubled variance**.  The 256KB flat label
+   table thrashed D-cache worse than the original 1KB-subtable design did.
+
+4. **Full handler inlining** was not attempted after #3 made it clear that
+   even the hybrid version fought the cache.  A 40k-line mega-function would
+   only worsen I-cache thrashing.
+
+### The architectural lesson
+
+> **On this toolchain, GCC + LTO already produce near-optimal code for the
+> Musashi interpreter loop.  Tweaks at the dispatch layer either lose to the
+> compiler or trade variance for peak speed.  The path to durable gains is
+> *avoiding the interpreter*, not optimizing it — i.e. profile-guided AOT.**
+
+Subsequent CPU work should:
+- Bias toward removing work entirely (idle-skip, HLE more functions, coarse
+  timing) rather than making per-instruction execution faster.
+- Re-baseline with fresh PROFILE data after every win — heavy/light scenes
+  shift hot PCs around, and an HLE list tuned for the wrong scene set hurts.
+- Treat the interpreter as the trusted reference, not the optimization target.
+
+### Memory budget caveat
+
+HLE costs RAM.  Each `hle_*.c` adds a few KB of code/data, and Blazing Star's
+PBROM allocation requires a 1 MiB-aligned contiguous region from the heap.  A
+16-PC list crashed on boot ("cannot allocate PBROM buffer") on 4 MiB consoles;
+8 PCs is the verified-safe ceiling.  Verify per-game headroom before expanding.
+
+---
+
 ## 1. CPU Emulation (m64k core)
 
 ### 1.1 Enable idle-skip (`rom_pc_idle_skip`)
@@ -31,17 +118,24 @@ subsystem and roughly ordered by expected impact.
   for a meaningful speedup in the CPU interpreter loop.
 - **Complexity:** Low
 
-### 1.3 AOT recompilation for hot game code
-- **File:** `genhle.c`, `m68k_recompiler.h`
-- **Problem:** The AOT (Ahead-Of-Time) recompiler infrastructure exists
-  (`genhle.c`) but doesn't appear to be integrated into the N64 runtime. Even a
-  static recompilation of known-hot functions (VBlank handler, main game loop)
-  into native MIPS would eliminate the 68K decode/dispatch overhead for those
-  paths.
-- **Fix:** Integrate `genhle` output into the N64 build. Identify per-game hot
-  functions and replace them with native MIPS. Even partial coverage of the top
-  5-10 functions would yield large gains.
-- **Complexity:** High (but infrastructure already exists)
+### 1.3 AOT recompilation for hot game code  ✅ DONE (Apr 2026)
+- **File:** `genhle.c`, `m68k_recompiler.h`, `Makefile.mvs64`, `m68kcpu.c:1000`
+- **Status:** Wired into the build, gated by `-DUSE_HLE`. Per-game hot PC list
+  in `Makefile.mvs64` (`HLE_PCS`); `make mvs64 USE_HLE=1 ...` regenerates
+  hle_*.c automatically from the byteswapped P-ROM/BIOS.
+- **Result:** +13% average FPS, +30% peak on Blazing Star (see Empirical
+  Findings).  Generates ~C output, not native MIPS — but with restricted-
+  pointer ABI in `m68k_recompiler.h`, GCC produces tight code that beats the
+  interpreter's per-instruction decode + dispatch overhead.
+- **Follow-up work:**
+  1. Re-baseline against a longer PROFILE session and prune/expand HLE_PCS.
+  2. Verify which next-hottest PCs (e.g. 0x51de, 0x5b3c, 0x5a3a from the
+     Apr 2026 profile) survive the re-baseline before adding them.
+  3. Stay under the 8-entry RAM-budget ceiling for Blazing Star, or verify
+     per-game.
+  4. Consider extending `genhle` to handle the patterns it currently bails on
+     (jump tables outside duff devices, certain branch types) for broader
+     coverage.
 
 ---
 
@@ -270,28 +364,37 @@ subsystem and roughly ordered by expected impact.
 
 ## Priority Order (Estimated Impact)
 
-| Priority | Item | Expected Gain | Effort |
-|----------|------|---------------|--------|
-| 1 | 1.1 Enable idle-skip | 20-40% CPU | Low |
-| 2 | 5.1 Auto-frameskip | Playability | Trivial |
-| 3 | 2.1 Reduce RDP syncs | 15-25% RDP | Medium |
-| 4 | 6.3 Remove hot-path debugf | 5-10% CPU | Low |
-| 5 | 3.1 Increase sprite cache | 10-20% DMA | Low |
-| 6 | 2.3 Better palette caching | 5-15% RDP | Low |
-| 7 | 3.2 Fix cache invalidation | 3-5% DMA | Low |
-| 8 | 4.1 Fast-path HWIO reads | 5-10% CPU | Medium |
-| 9 | 2.4 Skip offscreen sprites | 5-10% render | Low |
-| 10 | 1.2 Coarse timing mode | 5-15% CPU | Low |
-| 11 | 6.1 Uncached RDP buffers | 3-5% render | Low |
-| 12 | 3.4 Larger PBROM banks | 5-10% DMA | Low |
-| 13 | 6.2 Optimize event system | 2-3% CPU | Low |
-| 14 | 2.5 Wider Copy mode use | 5-10% RDP | Medium |
-| 15 | 2.2 Batch sprite commands | 10-15% RSP | Medium-High |
-| 16 | 3.3 Prefetch sprites | 5-10% DMA | Medium |
-| 17 | 2.6 Skip empty fix tiles | 2-5% render | Low |
-| 18 | 1.3 AOT recompilation | 30-50% CPU | High |
-| 19 | 4.2 Avoid delay-slot MMIO | 3-5% CPU | High |
-| 20 | 7.1 RSP audio | Future | High |
+| Priority | Item | Expected Gain | Effort | Status |
+|----------|------|---------------|--------|--------|
+| ✅ | 1.3 AOT recompilation (HLE) | +13% measured (Blazing Star) | High | Done Apr 2026 |
+| 1 | 1.1 Enable idle-skip | 20-40% CPU | Low | |
+| 2 | 5.1 Auto-frameskip | Playability | Trivial | |
+| 3 | 2.1 Reduce RDP syncs | 15-25% RDP | Medium | |
+| 4 | 6.3 Remove hot-path debugf | 5-10% CPU | Low | |
+| 5 | 3.1 Increase sprite cache | 10-20% DMA | Low | |
+| 6 | 2.3 Better palette caching | 5-15% RDP | Low | |
+| 7 | 3.2 Fix cache invalidation | 3-5% DMA | Low | |
+| 8 | 4.1 Fast-path HWIO reads | 5-10% CPU | Medium | |
+| 9 | 2.4 Skip offscreen sprites | 5-10% render | Low | |
+| 10 | 1.2 Coarse timing mode | 5-15% CPU | Low | |
+| 11 | 6.1 Uncached RDP buffers | 3-5% render | Low | |
+| 12 | 3.4 Larger PBROM banks | 5-10% DMA | Low | |
+| 13 | 6.2 Optimize event system | 2-3% CPU | Low | |
+| 14 | 2.5 Wider Copy mode use | 5-10% RDP | Medium | |
+| 15 | 2.2 Batch sprite commands | 10-15% RSP | Medium-High | |
+| 16 | 3.3 Prefetch sprites | 5-10% DMA | Medium | |
+| 17 | 2.6 Skip empty fix tiles | 2-5% render | Low | |
+| 18 | 4.2 Avoid delay-slot MMIO | 3-5% CPU | High | |
+| 19 | 7.1 RSP audio | Future | High | |
+
+**Items intentionally NOT in this table** (proven to either fail or regress on
+the current toolchain — see Empirical Findings):
+
+| Attempted | Outcome |
+|---|---|
+| Pin hot vars to MIPS s-registers (`register int x asm()`) | Toolchain incompatible; LTO breaks register allocation |
+| Embed `m68ki_remaining_cycles` in `m68ki_cpu` struct | -20% CPU regression; GCC was already doing better |
+| Computed-goto dispatch (hybrid w/ function calls) | Doubled FPS variance; cache-hostile; reverted |
 
 ---
 
