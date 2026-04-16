@@ -516,4 +516,8 @@ const char* game_ini[65536] = {
 	[GAME_AOF]      = "idle_skip=0x6790\n",
 	[GAME_AOF3]     = "idle_skip=0x15D2\n",
 	[GAME_PBOBBLEN] = "idle_skip=0xE76\n",
+	// Blazing Star: PC 0x43fe dominated ~90% of profile samples in idle
+	// sections — a textbook bne.s *-2 vblank wait loop.  Idle-skip burns
+	// the rest of the timeslice when the 68K branches to this address.
+	[GAME_BLAZSTAR] = "idle_skip=0x43fe\n",
 };
