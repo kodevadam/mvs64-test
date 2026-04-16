@@ -472,10 +472,20 @@ int main(int argc, char *argv[]) {
 		for (int i=0;i<arrlen(entrypoints);i++)
 			fprintf(out, "\tif (__entry_pc == 0x%x) goto op_%08X;\n", entrypoints[i], entrypoints[i]);
 		fprintf(out, "\tassert(!\"recompiler bug: invalid entrypoint\");\n");
+		// For each forward jump target the disassembler never reached (the
+		// function ends at an RTS before the branch fires), emit a stub label
+		// that bails to the interpreter at that PC.  Without this the function
+		// fails to compile because the goto in the branch body has no target,
+		// and previously genhle would just panic("forward jump not satisfied").
+		// Treating these as bail-outs is safe: control returns to m68k_execute
+		// which resumes the interpreter at the bail-out PC.
+		for (int i=0;i<hmlen(forward_jumps);i++) {
+			uint32_t target = forward_jumps[i].key;
+			fprintf(out, "\top_%08X: { REG_PC = 0x%x; goto exit; }\n", target, target);
+		}
 		fprintf(out, "}\n");
 		fclose(out);
 
-		if (hmlen(forward_jumps) > 0) panic("forward jump not satisfied: %x", forward_jumps[0].key);
 		hmfree(forward_jumps);
 		arrfree(entrypoints);
 	}
