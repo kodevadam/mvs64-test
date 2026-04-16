@@ -329,7 +329,7 @@ uint8_t *pbrom_cache_lookup(uint32_t address) {
 
 	// Populate the cache, loading from N64 ROM
 	uint32_t base = bank << PBROM_BANK_BITS;
-	debugf("[PBROM] loading %06x (bank:%x entry:%x)\n", (unsigned)base, (unsigned)bank, (unsigned)entry);
+	// debugf("[PBROM] loading %06x (bank:%x entry:%x)\n", (unsigned)base, (unsigned)bank, (unsigned)entry);
 	uint8_t *mem;
 	if (fastrand_bool()) { c->bank1 = bank; mem = c->mem1; }
 	else                 { c->bank2 = bank; mem = c->mem2; }

@@ -47,8 +47,8 @@ static uint16_t lspc_mode_r() {
 static void lspc_mode_w(uint16_t val) {
 	reg_lspcmode = val;
 
-	if (val & (1<<4))
-		debugf("[LSPC] Timer interrupt **************************\n");
+	// if (val & (1<<4))
+	// 	debugf("[LSPC] Timer interrupt **************************\n");
 }
 
 static void lspc_vblank(void) {
