@@ -33,7 +33,16 @@ endif
 # light scene clusters.  Expect the HLE_PCS list to shift whenever the
 # gameplay region changes; re-profile after significant perf work.
 ifdef USE_HLE
-HLE_PCS = 43fe 5a26 5986 59ec 5cba
+# Hot PCs across the three scene-type regions identified by profiling:
+#   idle/wait : 43fe
+#   light     : 5cba 5b50
+#   heavy     : 5152 522e 526a 527e 52a6 52e2 5382 5396 53aa 53d2
+#   misc      : 5a26 5986 59ec
+# The list looks redundant (e.g. 5382/5396 are close together) because each
+# entry is a distinct HLE function — the dispatch fires only when REG_PC
+# exactly matches an entry, so covering each branch-target / loop-top inside
+# a hot region matters even if they share the same enclosing function.
+HLE_PCS = 43fe 5a26 5986 59ec 5cba 5b50 5152 522e 526a 527e 52a6 52e2 5382 5396 53aa 53d2
 HLE_GEN_C = $(patsubst %,hle_%.c,$(HLE_PCS)) hle_index.c
 HLE_GEN_H = hle_index.h
 HLE_ALL   = $(HLE_GEN_C) $(HLE_GEN_H)
