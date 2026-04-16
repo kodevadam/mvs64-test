@@ -6,3 +6,5 @@ libdragon
 *.elf
 *.z64
 picodrive64/
+genhle
+mvsmakerom
