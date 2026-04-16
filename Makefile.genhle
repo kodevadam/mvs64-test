@@ -1,26 +1,73 @@
-BUILD_DIR = build/genhle
+# genhle: host-side AOT recompiler for 68K code.
+#
+# Self-contained host build.  The original Makefile.genhle pulled in a
+# `n64rasky.mk` include that isn't distributed with this repo, so building the
+# host tool required a specific libdragon fork.  This version uses the system
+# gcc directly and provides a tiny SDL.h stub (platform.h transitively pulls
+# SDL in on non-N64 builds but genhle never actually uses SDL at runtime).
 
-include n64rasky.mk
+BUILD_DIR = build/genhle
+STUB_DIR  = $(BUILD_DIR)/stubs
+
+# `override` beats inherited CC/CFLAGS/LDFLAGS when this makefile is invoked
+# recursively from Makefile.mvs64 (which has the N64 cross-compiler set up).
+override CC      := gcc
+override CFLAGS  := -O2 -Wall \
+                    -Wno-unused-result -Wno-unused-value \
+                    -Wno-stringop-truncation -Wno-parentheses \
+                    -I$(STUB_DIR) -Ilib \
+                    -MMD -MP
+override LDFLAGS :=
+
+ifeq ($(D),1)
+CFLAGS  += -fsanitize=address -fsanitize=undefined -g
+LDFLAGS += -fsanitize=address -fsanitize=undefined -g
+endif
 
 genhle_src = genhle.c m68kdasm.c
 genhle_obj = $(genhle_src:%.c=$(BUILD_DIR)/%.o)
 
-CFLAGS += -O2 -Wall -Werror
-
-ifeq ($(D),1)
-CFLAGS += -fsanitize=address -fsanitize=undefined -g
-LDFLAGS += -fsanitize=address -fsanitize=undefined -g
-endif
-
 all: genhle
+
+# Minimal SDL.h stub.  platform.h on non-N64 builds does `#include <SDL.h>`
+# and references SDL scancode constants, so we provide no-op defines just
+# so the translation unit parses.  genhle never calls any SDL function.
+$(STUB_DIR)/SDL.h:
+	@mkdir -p $(STUB_DIR)
+	@printf '%s\n' \
+	  '#ifndef SDL_H_STUB' \
+	  '#define SDL_H_STUB' \
+	  '#include <stdint.h>' \
+	  '#define SDL_SCANCODE_UP 0' \
+	  '#define SDL_SCANCODE_DOWN 0' \
+	  '#define SDL_SCANCODE_LEFT 0' \
+	  '#define SDL_SCANCODE_RIGHT 0' \
+	  '#define SDL_SCANCODE_Z 0' \
+	  '#define SDL_SCANCODE_X 0' \
+	  '#define SDL_SCANCODE_C 0' \
+	  '#define SDL_SCANCODE_V 0' \
+	  '#define SDL_SCANCODE_RETURN 0' \
+	  '#define SDL_SCANCODE_RSHIFT 0' \
+	  '#define SDL_SCANCODE_1 0' \
+	  '#define SDL_SCANCODE_2 0' \
+	  '#define SDL_SCANCODE_3 0' \
+	  '#define SDL_SCANCODE_4 0' \
+	  '#define SDL_SCANCODE_0 0' \
+	  '#endif' > $@
+
+$(BUILD_DIR)/%.o: %.c $(STUB_DIR)/SDL.h
+	@mkdir -p $(dir $@)
+	@echo "    [CC] $<"
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 genhle: $(genhle_obj)
 	@echo "    [LD] $@"
 	$(CC) $(LDFLAGS) -o $@ $^
 
 clean:
-	@rm -f $(genhle_obj) $(genhle_src:%.c=$(BUILD_DIR)/%.d)
+	@rm -rf $(BUILD_DIR)
+	@rm -f genhle
 
 -include $(genhle_src:%.c=$(BUILD_DIR)/%.d)
 
-.PHONY: all
+.PHONY: all clean
