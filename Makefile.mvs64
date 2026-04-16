@@ -21,7 +21,25 @@ src_68k = m68kcpu.c m68kops.c
 $(BUILD_DIR)/m68kops.o: CFLAGS += -O2
 endif
 
-src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(wildcard hle_*.c)
+# AOT recompilation ("HLE") for hot 68K functions.  When USE_HLE=1 the build
+# invokes ./genhle against the byteswapped P-ROM + BIOS to emit one hle_<pc>.c
+# per listed entry address plus a perfect-hash lookup table (hle_index.[ch]).
+# m68k_execute() then checks hle_get_func(REG_PC) before falling through to
+# the interpreter dispatch.  Entries here were picked from PROFILE samples —
+# the most frequently sampled PCs during Blazing Star play.
+ifdef USE_HLE
+HLE_PCS = 522e 527e 526a 53d2 5a26
+HLE_GEN_C = $(patsubst %,hle_%.c,$(HLE_PCS)) hle_index.c
+HLE_GEN_H = hle_index.h
+HLE_ALL   = $(HLE_GEN_C) $(HLE_GEN_H)
+CFLAGS += -DUSE_HLE
+else
+HLE_GEN_C = $(wildcard hle_*.c)
+HLE_GEN_H =
+HLE_ALL   =
+endif
+
+src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C)
 asm = tlb_vector.S
 rsp = rsp_video.S
 obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.o)
@@ -40,9 +58,19 @@ all: mvsmakerom mvs64-${ROMNAME}.z64
 test:
 	make -f Makefile.tests all
 
-$(BUILD_DIR)/mvs64-${ROMNAME}.dfs: $(ROM) mvsmakerom
+# Byteswapping the BIOS+ROM into $(ROMDIR) is split from DFS packaging so
+# that the HLE code generator can depend on its output (p.rom, p.bios, ...)
+# without re-running mvsmakerom on every HLE re-gen.  A sentinel file tracks
+# "mvsmakerom ran successfully for this (BIOS, ROM) pair."
+MVS_STAMP = $(BUILD_DIR)/.mvs-stamp
+
+$(MVS_STAMP): $(ROM) mvsmakerom
 	@echo "    [MVS] ${ROMDIR}"
 	./mvsmakerom $(BIOS) $(ROM)
+	@mkdir -p $(dir $@)
+	@touch $@
+
+$(BUILD_DIR)/mvs64-${ROMNAME}.dfs: $(MVS_STAMP)
 	@echo "    [DFS] $@"
 	$(N64_MKDFS) $@ $(ROMDIR) >/dev/null
 
@@ -54,6 +82,36 @@ mvsmakerom: $(obj_makerom)
 	@echo "    [LD] $@"
 	$(CC) $(LDFLAGS) -o $@ $^
 
+ifdef USE_HLE
+# Delegate building the host genhle tool to its own sub-makefile.  FORCE
+# makes us invoke it every time (so genhle gets rebuilt when its sources
+# change) but the sub-make itself is a no-op when the binary is current —
+# we only pay the cost of running make, not of re-linking.
+FORCE:
+genhle: FORCE
+	@$(MAKE) -f Makefile.genhle
+
+HLE_STAMP = $(BUILD_DIR)/.hle-stamp
+
+# Single invocation of genhle produces ALL HLE files.  The stamp file solves
+# the "one recipe, many outputs" make-parallelism hazard: every generated
+# file depends on the stamp, but the recipe runs exactly once.
+# `genhle` is an order-only prerequisite (after `|`) so that the sub-make's
+# always-run pattern doesn't force us to regenerate HLE on every build —
+# we only regen when the BIOS/ROM, m68kops.c, or the HLE_PCS list changes.
+$(HLE_STAMP): $(MVS_STAMP) m68kops.c Makefile.mvs64 | genhle
+	@echo "    [HLE] generating $(words $(HLE_PCS)) function(s) from $(ROMDIR)"
+	./genhle $(ROMDIR)/p.rom $(HLE_PCS) $(ROMDIR)/p.bios@c00000
+	@mkdir -p $(dir $@)
+	@touch $@
+
+$(HLE_ALL): $(HLE_STAMP)
+
+# m68kcpu.c #includes hle_index.h when USE_HLE is set; this dependency tells
+# make to generate the header before compiling that TU (before .d files exist).
+$(BUILD_DIR)/m68kcpu.o: hle_index.h
+endif
+
 clean:
 	rm -f $(obj)
 	rm -f $(obj_makerom)
@@ -63,6 +121,8 @@ clean:
 	rm -f mvs64-*.elf
 	rm -f mvs64-*.dfs
 	rm -f mvs64-*.z64
+	rm -f hle_*.c hle_index.h
+	rm -f $(BUILD_DIR)/.mvs-stamp $(BUILD_DIR)/.hle-stamp
 
 -include $(src:%.c=$(BUILD_DIR)/%.d) $(asm:%.S=$(BUILD_DIR)/%.d) $(src_makerom:%.c=$(BUILD_DIR)/%.d)
 

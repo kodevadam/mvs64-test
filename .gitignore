@@ -8,3 +8,6 @@ libdragon
 picodrive64/
 genhle
 mvsmakerom
+# HLE files are generated per-ROM by genhle at build time
+hle_*.c
+hle_index.h

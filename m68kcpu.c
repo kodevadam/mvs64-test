@@ -51,6 +51,10 @@ extern void m68ki_build_opcode_table(void);
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef USE_HLE
+#include "hle_index.h"
+#endif
+
 /* Two-level opcode dispatch for cache efficiency.
  * The flat 256KB jump table (65536 x 4-byte pointers) thrashes the VR4300's
  * 16KB D-cache. By splitting it into 256 separately-allocated 1KB sub-tables,
@@ -992,6 +996,19 @@ int m68k_execute(int num_cycles)
 		/* Main loop.  Keep going until we run out of clock cycles. */
 		do
 		{
+#ifdef USE_HLE
+			/* Check for AOT-recompiled function at current PC.  When found,
+			 * call it and let it run until it returns (either naturally via
+			 * RTS, or by bailing out on a call/jmp).  It updates REG_PC and
+			 * m68ki_remaining_cycles directly.  Then we resume the interpreter
+			 * at whatever PC the HLE function left us at. */
+			const HLEFunc *hle = hle_get_func(REG_PC);
+			if (hle) {
+				REG_PPC = REG_PC;
+				REG_PC = hle->func(&m68ki_cpu, &m68ki_remaining_cycles, REG_PC);
+				continue;
+			}
+#endif
 			REG_PPC = REG_PC;
 			REG_IR = m68ki_read_imm_16();
 			m68k_dispatch_l2[REG_IR >> 8][REG_IR & 0xFF]();

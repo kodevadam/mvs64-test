@@ -243,9 +243,26 @@ int main(int argc, char *argv[]) {
 			getline(&line, &linecap, f); // skip open parenthesis
 
 			int nl = 0;
+			int first_content_line = 1;
 			while (1) {
 				getline(&line, &linecap, f);
 				if (!strcmp(line, "}\n")) break;
+				// Strip the leading USE_CYCLES(N) that most Musashi handlers open
+				// with: genhle emits its own USE_CYCLES from the opcode table, so
+				// keeping the body's version too would double-count cycles and
+				// cause the emulated CPU to run at half speed (desync, glitches).
+				// Only the FIRST USE_CYCLES is stripped; trailing ones (e.g. for
+				// not-taken-branch cycle adjustment) are kept.
+				if (first_content_line && strstartwith(line, "\tUSE_CYCLES(")) {
+					first_content_line = 0;
+					continue;
+				}
+				// Skip leading blank lines before the first statement without
+				// flipping first_content_line (so USE_CYCLES can still be stripped
+				// if it appears after a blank).
+				if (first_content_line && line[0] == '\n')
+					continue;
+				first_content_line = 0;
 				strcat(body, "\t");
 				strcat(body, line);
 				if (++nl == 1000) panic("body too big: %s\n", name);
