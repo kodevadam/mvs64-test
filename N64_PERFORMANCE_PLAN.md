@@ -40,6 +40,51 @@ Required fixes to genhle to make it production-viable:
    instead of panicking.  Real 68K functions frequently branch outside their
    "natural" body and the recompiler must degrade gracefully.
 
+### Follow-up wins: idle-skip + one more HLE PC (Apr 2026, round 2)
+
+After banking the first HLE milestone, two more single-step experiments
+moved the floor substantially further:
+
+1. **Idle-skip for Blazing Star at PC 0x43fe.**  The dominant ~90%-of-samples
+   idle loop is now caught by the existing `m68k_check_idle_skip()` branch-
+   macro hook (`m68kcpu.h:1550`) instead of being HLE'd.  Key insight: HLE
+   preempts the interpreter entirely, so an HLE'd idle loop *defeats* idle-
+   skip by spinning in generated C gotos and never returning until cycles
+   are already consumed.  Removing 0x43fe from `HLE_PCS` and configuring
+   `idle_skip=0x43fe` in game.ini lets the branch-macro path burn the
+   timeslice in O(1) on loop back-edges.
+   - **False start:** An initial attempt added the idle check at the *top*
+     of `m68k_execute()`'s dispatch loop, before any instruction ran.  That
+     bricked boot — the CMP that polls the VBL flag never executed, so the
+     game couldn't exit the loop, and the watchdog reset.  The branch-macro
+     path works because it only fires *after* at least one pass through the
+     loop body, where polling already happened.  Lesson: idle-skip semantics
+     require "we are looping back," not "we are here."
+2. **Add 0x5866 to `HLE_PCS` based on heavy-scene profile hotspots.**  This
+   single-entry addition produced the biggest single-change FPS delta
+   measured on this project so far.
+
+| Metric | 7-PC HLE + idle-skip | 8-PC HLE (+0x5866) + idle-skip | Δ |
+|---|---|---|---|
+| Gameplay floor FPS | 39.2 | 46.5 | **+7.3** |
+| Median gameplay FPS | ~46.5 | ~53 | **+6.5** |
+| Peak gameplay FPS | 53.4 | 57.4 | +4.0 |
+| FPS spread | 14 | 11 | tighter |
+| Heavy-scene CPU% | 150–165 | 125–140 | lower |
+
+The profile *shape* changed too.  Heavy scenes that previously ran at
+FPS 39–41 with CPU~160% / draw~22% now run at FPS 52–57 with
+CPU~130% / draw~40–47% / DMA~15–22%.  **The bottleneck in the hardest
+scenes flipped from CPU to draw/DMA.**  The CPU-bound floor (46–49 FPS
+with modest draw) remains, but with more scattered hot PCs — the big,
+obvious CPU lever has been pulled.
+
+This is the signal to pivot: further HLE slots have diminishing returns
+(workload is now spread across many lukewarm PCs, and going past 8
+entries risks PBROM allocation failure), while draw/DMA has become a
+fresh, credible ceiling.  Frozen milestone build: `HLE_PCS = 5cba 5b50
+5152 522e 5382 53d2 5a26 5866` with `idle_skip=0x43fe` for Blazing Star.
+
 ### What did NOT work: interpreter micro-optimizations
 
 Four separate attempts to reduce per-instruction interpreter overhead were
@@ -95,18 +140,18 @@ PBROM allocation requires a 1 MiB-aligned contiguous region from the heap.  A
 
 ## 1. CPU Emulation (m64k core)
 
-### 1.1 Enable idle-skip (`rom_pc_idle_skip`)
-- **File:** `roms.c:410`, `emu.c:68-79`
-- **Problem:** `rom_pc_idle_skip` is parsed from `game.ini` but then immediately
-  overwritten to 0 (`roms.c:410`). Many NeoGeo games have a tight spin loop in
-  their main loop waiting for VBlank (e.g. `bne.s *-2`). The emulator currently
-  burns real N64 CPU cycles emulating these busy-wait loops instruction by
-  instruction.
-- **Fix:** Remove the `rom_pc_idle_skip = 0;` override. Implement idle-skip in
-  `m64k_exec()`: when the 68K PC matches the idle-skip address, advance the
-  m68k clock to the next event instead of emulating individual opcodes. This
-  could save 20-40% of CPU time per frame depending on the game.
-- **Complexity:** Low
+### 1.1 Enable idle-skip (`rom_pc_idle_skip`)  ✅ DONE (Apr 2026)
+- **File:** `roms.c:418`, `m68kinline.h:90`, `m68kcpu.h:1550,1557,1568`,
+  `mvsmakerom.c:519`
+- **Status:** Per-game `idle_skip` values are parsed from the synthetic
+  `game.ini` baked in by `mvsmakerom.c`; `rom_pc_idle_skip` is populated at
+  load time and consumed by `m68k_check_idle_skip()` inside the Musashi branch
+  macros (`m68ki_branch_8/16/32`).  On a branch-back to the idle PC,
+  `m68k_consume_timeslice()` sets cycles to 0 and the dispatch loop exits.
+  **Must live in the branch macros, not at dispatch-loop entry** — see
+  "Follow-up wins" above for the false-start analysis.
+- **Result:** Combined with the 8th HLE PC, lifted the Blazing Star floor
+  from 39.2 → 46.5 FPS.
 
 ### 1.2 Use coarse timing mode for select games
 - **File:** `m64k/m64k_config.h:18-19`
@@ -367,12 +412,12 @@ PBROM allocation requires a 1 MiB-aligned contiguous region from the heap.  A
 | Priority | Item | Expected Gain | Effort | Status |
 |----------|------|---------------|--------|--------|
 | ✅ | 1.3 AOT recompilation (HLE) | +13% measured (Blazing Star) | High | Done Apr 2026 |
-| 1 | 1.1 Enable idle-skip | 20-40% CPU | Low | |
+| ✅ | 1.1 Enable idle-skip | +7 FPS floor (combined w/ 8th HLE PC) | Low | Done Apr 2026 |
+| 1 | 2.1 Reduce RDP syncs | 15-25% RDP | Medium | **← next** (draw% pivot) |
 | 2 | 5.1 Auto-frameskip | Playability | Trivial | |
-| 3 | 2.1 Reduce RDP syncs | 15-25% RDP | Medium | |
+| 3 | 3.1 Increase sprite cache | 10-20% DMA | Low | candidate (dma% pivot) |
 | 4 | 6.3 Remove hot-path debugf | 5-10% CPU | Low | |
-| 5 | 3.1 Increase sprite cache | 10-20% DMA | Low | |
-| 6 | 2.3 Better palette caching | 5-15% RDP | Low | |
+| 5 | 2.3 Better palette caching | 5-15% RDP | Low | |
 | 7 | 3.2 Fix cache invalidation | 3-5% DMA | Low | |
 | 8 | 4.1 Fast-path HWIO reads | 5-10% CPU | Medium | |
 | 9 | 2.4 Skip offscreen sprites | 5-10% render | Low | |
