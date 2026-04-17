@@ -2,7 +2,7 @@
  *
  * CZ80 (Z80 CPU emulator) version 0.9
  * Compiled with Dev-C++
- * Copyright 2004-2005 Stéphane Dallongeville
+ * Copyright 2004-2005 Stï¿½phane Dallongeville
  *
  * (Modified by NJ)
  *
@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#include <pico/pico_port.h>
+#include "../../pico/pico_port.h"
 
 /******************************/
 /* Compiler dependant defines */
