@@ -65,7 +65,7 @@ extern "C" {
 #define CZ80_FETCH_SFT			(16 - CZ80_FETCH_BITS)
 #define CZ80_FETCH_BANK			(1 << CZ80_FETCH_BITS)
 
-#define PICODRIVE_HACKS			1
+#define PICODRIVE_HACKS			0  /* disabled for MVS64 — use callback-based memory access */
 #define CZ80_LITTLE_ENDIAN		CPU_IS_LE
 #define CZ80_USE_JUMPTABLE		1
 #define CZ80_BIG_FLAGS_ARRAY		1
