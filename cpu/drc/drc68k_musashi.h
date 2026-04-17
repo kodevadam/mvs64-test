@@ -21,7 +21,7 @@
 #ifndef DRC68K_MUSASHI_H
 #define DRC68K_MUSASHI_H
 
-#include "m68kcpu.h"
+#include "../../m68kcpu.h"
 
 /* The DRC operates on a pointer to m68ki_cpu_core (Musashi's CPU state).
  * Replace FAME's M68K_CONTEXT with Musashi's type. */
