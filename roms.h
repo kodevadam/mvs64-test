@@ -4,6 +4,10 @@
 extern uint8_t *P_ROM;
 extern unsigned int rom_pc_idle_skip;
 
+/* Z80 sound driver ROM (M1) */
+extern uint8_t *M1_ROM;
+extern int M1_ROM_SIZE;
+
 void rom_load(const char *dir);
 void rom_load_prom(const char *dir);
 

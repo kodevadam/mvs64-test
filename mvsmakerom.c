@@ -41,6 +41,7 @@ typedef struct {
 	uint8_t *PROM; int prom_size;
 	uint8_t *CROM; int crom_size;
 	uint8_t *SROM; int srom_size;
+	uint8_t *MROM; int mrom_size;  /* Z80 sound driver ROM */
 } Game;
 
 typedef struct {
@@ -344,12 +345,13 @@ void load_game(const char *fn, Game *game) {
 
 	if (!mz_zip_reader_init_file(&zip, fn, 0)) panic("%s\n", mz_zip_get_error_string(mz_zip_get_last_error(&zip)));
 
-	Romset P, C, S, X;
+	Romset P, C, S, X, M;
 
 	memset(&P, 0, sizeof(Romset));
 	memset(&C, 0, sizeof(Romset));
 	memset(&S, 0, sizeof(Romset));
 	memset(&X, 0, sizeof(Romset));
+	memset(&M, 0, sizeof(Romset));
 
 	for (int index = 0;;index++) {
 		mz_zip_archive_file_stat stat;
@@ -365,6 +367,7 @@ void load_game(const char *fn, Game *game) {
 		if ((idx = romtype(fn, 'g'))) romset_add(&P, idx, &stat); // some PROMs are called pg1/pg2
 		if ((idx = romtype(fn, 's'))) romset_add(&S, idx, &stat);
 		if ((idx = romtype(fn, 'c'))) romset_add(&C, idx, &stat);
+		if ((idx = romtype(fn, 'm'))) romset_add(&M, idx, &stat);
 		if (strstr(fn, "sma")) romset_add(&X, 1, &stat);
 	}
 
@@ -439,6 +442,13 @@ void load_game(const char *fn, Game *game) {
 	while (memcmp(game->SROM+game->srom_size-64, game->SROM+game->srom_size-32, 32) == 0) 
 		game->srom_size -= 32;
 
+	// Load M1 ROM (Z80 sound driver)
+	int num_mroms = romset_count(&M);
+	if (num_mroms > 0) {
+		game->MROM = romset_load(&M, &zip, 0);
+		game->mrom_size = M.total_size;
+	}
+
 	// Preprocess graphics ROMs to convert it into N64 4bpp format
 	crom_preprocess(game->CROM, game->crom_size);
 	fixrom_preprocess(game->SROM, game->srom_size);
@@ -493,6 +503,11 @@ int main(int argc, char *argv[]) {
 
 	outfn[off] = 's';
 	saveto(game.SROM, game.srom_size, outfn);
+
+	if (game.MROM && game.mrom_size > 0) {
+		outfn[off] = 'm';
+		saveto(game.MROM, game.mrom_size, outfn);
+	}
 
 	strcpy(outfn+off, "?.bios");
 

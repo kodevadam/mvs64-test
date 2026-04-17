@@ -272,11 +272,10 @@ int main(int argc, char *argv[]) {
 
 	hw_init();
 
-	/* Initialize Z80 + YM2610 sound subsystem.
-	 * The M1 ROM (Z80 sound driver) is loaded by rom_load() into
-	 * a buffer we can pass here.  TODO: wire up actual M1 ROM pointer
-	 * from roms.c once the ROM loading path includes it. */
-	sound_init(NULL, 0);
+	/* Initialize Z80 + YM2610 sound subsystem with M1 ROM. */
+	extern uint8_t *M1_ROM;
+	extern int M1_ROM_SIZE;
+	sound_init(M1_ROM, M1_ROM_SIZE);
 
 	g_clock = 0;
 
@@ -307,6 +306,18 @@ int main(int argc, char *argv[]) {
 		/* Run Z80 sound CPU for one frame's worth of cycles.
 		 * Z80 at 4 MHz, 60 fps → ~66667 cycles/frame. */
 		sound_update(Z80_CLOCK / 60);
+
+		/* Render audio samples and push to libdragon.
+		 * 22050 Hz / 60 fps ≈ 368 samples per frame. */
+		#ifdef N64
+		{
+			static int16_t snd_buf[512 * 2]; /* stereo */
+			int nsamples = sound_render(snd_buf, 368);
+			if (nsamples > 0) {
+				audio_push(snd_buf, nsamples, false);
+			}
+		}
+		#endif
 
 		if (!plat_poll()) break;
 

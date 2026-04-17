@@ -37,6 +37,9 @@ void plat_init(int audiofreq, int fps) {
 
     // Register our custom RSP overlay into the RSP queue engine
     RSP_OVL_ID = rspq_overlay_register(&rsp_video);
+
+    // Initialize audio output (22050 Hz stereo, 4 buffers)
+    audio_init(22050, 4);
 }
 
 int plat_poll(void) {

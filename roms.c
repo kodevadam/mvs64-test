@@ -23,6 +23,10 @@ uint8_t *PB_ROM;
 
 // Address to trigger idle-skipping
 unsigned int rom_pc_idle_skip = 0;
+
+// Z80 sound driver ROM (M1)
+uint8_t *M1_ROM = NULL;
+int M1_ROM_SIZE = 0;
 extern uint32_t profile_dma_load;
 
 static SpriteCache srom_cache;
@@ -426,6 +430,22 @@ void rom_load(const char *dir) {
 	srom_fn[0] = strcatalloc(dir, "s.bios");
 	srom_fn[1] = strcatalloc(dir, "s.rom");
 	crom_fn[0] = strcatalloc(dir, "c.rom");
+
+	/* Load M1 ROM (Z80 sound driver) if present */
+	{
+		char *m1_fn = strcatalloc(dir, "m.rom");
+		FILE *mf = fopen(m1_fn, "rb");
+		if (mf) {
+			fseek(mf, 0, SEEK_END);
+			M1_ROM_SIZE = ftell(mf);
+			fseek(mf, 0, SEEK_SET);
+			M1_ROM = malloc(M1_ROM_SIZE);
+			fread(M1_ROM, 1, M1_ROM_SIZE, mf);
+			fclose(mf);
+			debugf("[ROM] loaded M1 sound ROM: %d bytes\n", M1_ROM_SIZE);
+		}
+		free(m1_fn);
+	}
 
 	rom_cache_init();
 	srom_set_bank(0);  // Set SFIX as current
