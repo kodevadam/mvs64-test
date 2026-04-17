@@ -76,9 +76,11 @@ src_sound = sound/ym2610_intf.c sound/rsp_fm.c sound/rsp_audio.c
 $(shell mkdir -p $(BUILD_DIR)/sound $(BUILD_DIR)/cpu/cz80)
 # CZ80 is compiled separately without LTO (large generated code)
 $(BUILD_DIR)/cpu/cz80/cz80.o: CFLAGS += -O2 -fno-lto
-# RSP overlay companion C files must not use LTO (ucode data symbols)
+# Sound subsystem compiled without LTO — RSP ucode symbols and cross-object
+# calls between LTO and non-LTO objects don't resolve cleanly.
 $(BUILD_DIR)/sound/rsp_fm.o: CFLAGS += -fno-lto
 $(BUILD_DIR)/sound/rsp_audio.o: CFLAGS += -fno-lto
+$(BUILD_DIR)/sound/ym2610_intf.o: CFLAGS += -fno-lto
 CFLAGS += -Icpu/cz80 -Ipico
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C) $(src_drc) $(src_sound) cpu/cz80/cz80.c
