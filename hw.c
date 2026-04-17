@@ -31,7 +31,7 @@ typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 //       68K can poll bit 7 to detect completion.
 //
 // Without a Z80 emulator, we latch the expected response immediately.
-static uint8_t z80_result = 0x01;  // Z80 "ready" value expected during BIOS boot
+uint8_t z80_result = 0x01;  // Z80 "ready" value expected during BIOS boot (non-static: assembly fast-path reads it)
 
 #ifdef N64
 #define ALIGN_64K  __attribute__((aligned(64*1024)))

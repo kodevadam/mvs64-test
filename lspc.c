@@ -3,7 +3,7 @@ uint16_t *reg_vram_bank;
 uint16_t reg_vram_addr;
 uint16_t reg_vram_mod;
 uint16_t reg_vram_mask;
-static uint16_t reg_lspcmode;
+uint16_t reg_lspcmode;  // non-static: assembly fast-path writes it
 static uint8_t lspc_aa_counter;
 static uint8_t lspc_aa_tick;
 

@@ -192,6 +192,11 @@ tlbcallhandler_standard:
 	sd $24, 19*8(sp)
 	sd $25, 20*8(sp)
 
+	# Count slow-path HWIO calls for profiling ($2 was just saved)
+	lw $2, %gprel(profile_hw_io)(gp)
+	addiu $2, 1
+	sw $2, %gprel(profile_hw_io)(gp)
+
 	ld t6, 17*8(sp)   # restore t6, which was modified by the fasthandler code
 
 	mfc0 t0, C0_EPC
@@ -554,6 +559,7 @@ mvs64_asm_io_read8:
 	blt k1, 0x300000, asm_pbrom_r
 	beq k1, 0x300000, asm_input_p1cnt_r      # P1 controller
 	beq k1, 0x300001, asm_dipsw_r            # DIP switches (constant)
+	beq k1, 0x320000, asm_z80_result_r       # Z80 result latch
 	beq k1, 0x380000, asm_input_status_b_r   # Status B (start/select)
 	j tlbcallhandler_standard
 
@@ -609,6 +615,12 @@ asm_dipsw_r:
 	li t6, 0xFF ^ 0x40   # = 0xBF
 	jr ra
 
+# 0x320000: Z80 result latch.  Games poll this after sending a sound command.
+# Without a real Z80 CPU, the result is faked in write_hwio (hw.c).
+asm_z80_result_r:
+	lbu t6, %gprel(z80_result)(gp)
+	jr ra
+
 # 0x380000: Status-B register (start, select, memory-card, MVS flags).
 # keystate indices: P1_START=9, P1_SELECT=10
 asm_input_status_b_r:
@@ -648,6 +660,7 @@ mvs64_asm_io_write:
 	beq k1, 0x3C0000, asm_lspc_vram_addr_w
 	beq k1, 0x3C0002, asm_lspc_vram_data_w
 	beq k1, 0x3C0004, asm_lspc_vram_modulo_w
+	beq k1, 0x3C0006, asm_lspc_mode_w        # LSPC mode register
 	bge k1, 0x400000, asm_video_palette_w
 	j tlbcallhandler_standard
 
@@ -689,6 +702,12 @@ asm_lspc_vram_data_w:
 
 asm_lspc_vram_modulo_w:
 	sh value, %gprel(reg_vram_mod)(gp)
+	jr ra
+
+# 0x3C0006: LSPC mode register (auto-animation config + timer setup).
+# The C handler (lspc_mode_w) just stores the value.
+asm_lspc_mode_w:
+	sh value, %gprel(reg_lspcmode)(gp)
 	jr ra
 
 asm_video_palette_w:
