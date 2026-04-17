@@ -55,6 +55,10 @@ extern void m68ki_build_opcode_table(void);
 #include "hle_index.h"
 #endif
 
+#ifdef USE_DRC
+#include "cpu/drc/drc68k.h"
+#endif
+
 /* Two-level opcode dispatch for cache efficiency.
  * The flat 256KB jump table (65536 x 4-byte pointers) thrashes the VR4300's
  * 16KB D-cache. By splitting it into 256 separately-allocated 1KB sub-tables,
@@ -996,6 +1000,18 @@ int m68k_execute(int num_cycles)
 		/* Main loop.  Keep going until we run out of clock cycles. */
 		do
 		{
+#ifdef USE_DRC
+			/* Try DRC-compiled block at current PC.  Returns cycles
+			 * consumed (>= 0) or -1 if no block exists / couldn't compile.
+			 * On success, REG_PC is updated by the compiled block. */
+			{
+				int drc_cycles = drc68k_execute(REG_PC, GET_CYCLES());
+				if (drc_cycles >= 0) {
+					USE_CYCLES(drc_cycles);
+					continue;
+				}
+			}
+#endif
 #ifdef USE_HLE
 			/* Check for AOT-recompiled function at current PC.  When found,
 			 * call it and let it run until it returns (either naturally via

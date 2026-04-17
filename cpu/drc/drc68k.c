@@ -1,30 +1,31 @@
 /*
- * PicoDrive 68k Dynamic Recompiler for MIPS III (VR4300/N64)
+ * 68k Dynamic Recompiler for MIPS III (VR4300/N64)
  *
+ * Ported from PicoDrive64.  Adapted for Musashi interpreter (MVS64).
  * Phase 1: Minimal hybrid dynarec
  * - Compiles basic blocks for common opcodes
- * - Falls back to FAME interpreter for unsupported ops
- * - Uses emit_mips.c for native code generation
+ * - Falls back to Musashi interpreter for unsupported ops
+ * - Emits native MIPS III instructions directly
  *
- * (C) 2026
- * This work is licensed under the terms of MAME license.
- * See COPYING file in the top-level directory.
+ * Original (C) 2026, licensed under MAME license.
  */
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-#include <pico/pico_int.h>
-#include <pico/memory.h>
-#include "cmn.h"
 #include "drc68k.h"
+#include "drc68k_musashi.h"
+#include "cmn.h"
 
-/* Stubs/defines needed by emit_mips.c */
-#define COUNT_OP   /* no-op: profiling counter not used */
-#define EMIT_CACHE 0
+#ifdef N64
+#include <libdragon.h>
 #define host_instructions_updated(a, b, c) \
-	cache_flush_d_inval_i(a, b)
+	data_cache_hit_writeback_invalidate(a, (u8*)(b) - (u8*)(a)); \
+	inst_cache_hit_invalidate(a, (u8*)(b) - (u8*)(a))
+#else
+#define host_instructions_updated(a, b, c)
+#endif
 
 static u32 *tcache_ptr;
 #define EMIT(x) *tcache_ptr++ = (x)
@@ -109,19 +110,19 @@ drc68k_state_t drc68k;
 /*
  * 68k has 16 registers (D0-D7, A0-A7) + PC + SR/CCR.
  * MIPS has limited registers. Strategy:
- * - Keep 68k regs in a memory context block (M68K_CONTEXT)
+ * - Keep 68k regs in a memory context block (m68ki_cpu_core)
  * - Load into MIPS temporaries for each compiled instruction
  * - Write back after modification
  * - Lazy flag computation: store result, derive NZVC when needed
  *
  * MIPS register usage during compiled blocks:
- *   s0 = pointer to M68K_CONTEXT
+ *   s0 = pointer to m68ki_cpu_core
  *   s1 = pointer to 68k Fetch table (for PC->real address mapping)
  *   s2 = cycle counter (decremented per instruction)
  *   t0-t6 = temporaries for 68k operations
  *   AT = reserved by emitter
  */
-#define REG_CTX     16  /* s0 - M68K_CONTEXT pointer */
+#define REG_CTX     16  /* s0 - m68ki_cpu_core pointer */
 #define REG_FETCH   17  /* s1 - Fetch table pointer */
 #define REG_CYCLES  18  /* s2 - cycle counter */
 #define REG_TMP0     8  /* t0 */
@@ -130,32 +131,22 @@ drc68k_state_t drc68k;
 #define REG_TMP3    11  /* t3 */
 #define REG_TMP4    12  /* t4 */
 
-/* M68K_CONTEXT field offsets */
-#define CTX_OFF_DREG(n)  (offsetof(M68K_CONTEXT, dreg) + (n) * 4)
-#define CTX_OFF_AREG(n)  (offsetof(M68K_CONTEXT, areg) + (n) * 4)
-#define CTX_OFF_PC       (offsetof(M68K_CONTEXT, pc))
-#define CTX_OFF_SR       (offsetof(M68K_CONTEXT, sr))
-#define CTX_OFF_CYCLES   (offsetof(M68K_CONTEXT, io_cycle_counter))
-#define CTX_OFF_FLAG_C   (offsetof(M68K_CONTEXT, flag_C))
-#define CTX_OFF_FLAG_V   (offsetof(M68K_CONTEXT, flag_V))
-#define CTX_OFF_FLAG_NZ  (offsetof(M68K_CONTEXT, flag_NotZ))
-#define CTX_OFF_FLAG_N   (offsetof(M68K_CONTEXT, flag_N))
-#define CTX_OFF_FLAG_X   (offsetof(M68K_CONTEXT, flag_X))
-#define CTX_OFF_FETCH    (offsetof(M68K_CONTEXT, Fetch))
+/* Musashi m68ki_cpu_core field offsets (via drc68k_musashi.h) */
+#define CTX_OFF_DREG(n)  DRC_OFF_DREG(n)
+#define CTX_OFF_AREG(n)  DRC_OFF_AREG(n)
+#define CTX_OFF_PC       DRC_OFF_PC
+#define CTX_OFF_FLAG_C   DRC_OFF_FLAG_C
+#define CTX_OFF_FLAG_V   DRC_OFF_FLAG_V
+#define CTX_OFF_FLAG_NZ  DRC_OFF_FLAG_NZ
+#define CTX_OFF_FLAG_N   DRC_OFF_FLAG_N
+#define CTX_OFF_FLAG_X   DRC_OFF_FLAG_X
 
 /* ======== 68k Instruction Decoder ======== */
 
-/* Read a 16-bit word from 68k address space (for block compilation) */
-#define M68K_FETCH_SHIFT 16  /* 24 - FAMEC_FETCHBITS(8) */
-#define M68K_FETCH_MASK  0xff
-
-static u16 fetch_68k_word(u32 addr)
-{
-	uptr base = PicoCpuFM68k.Fetch[(addr >> M68K_FETCH_SHIFT) & M68K_FETCH_MASK];
-	if (base == (uptr)-1)
-		return 0x4e71; /* NOP if unmapped */
-	return *(u16 *)(base + addr);
-}
+/* Read a 16-bit word from 68k address space (for block compilation).
+ * Uses drc_fetch_68k_word() from drc68k_musashi.h which reads directly
+ * from MVS64's P_ROM/BIOS/WORK_RAM pointers. */
+#define fetch_68k_word(addr)  drc_fetch_68k_word(addr)
 
 /* 68k addressing mode types */
 #define EA_DREG     0   /* Dn */
@@ -201,28 +192,34 @@ static void emit_store_areg(int areg_num, int mips_reg)
 	EMIT(MIPS_SW(mips_reg, CTX_OFF_AREG(areg_num), REG_CTX));
 }
 
-/* Emit: update N and Z flags from result in mips_reg (long size)
- * FAME flag format:
- *   flag_NotZ = result (any bit set = Z clear)
- *   flag_N = result (bit 31 = N for long, bit 15 for word, bit 7 for byte)
+/* Emit: update N and Z flags from result in mips_reg (long size).
+ * Musashi flag encoding:
+ *   not_z_flag = result (any bit set = Z clear) — same as FAME
+ *   n_flag     = result >> 24 (N = bit 7)       — FAME stores full result
  */
 static void emit_update_nz_long(int mips_reg)
 {
 	EMIT(MIPS_SW(mips_reg, CTX_OFF_FLAG_NZ, REG_CTX));
-	EMIT(MIPS_SW(mips_reg, CTX_OFF_FLAG_N, REG_CTX));
+	/* Musashi: n_flag = NFLAG_32(result) = result >> 24 */
+	EMIT(MIPS_SRL(REG_TMP4, mips_reg, 24));
+	EMIT(MIPS_SW(REG_TMP4, CTX_OFF_FLAG_N, REG_CTX));
 }
 
-/* Emit: clear V and C flags (FAME: flag_C bit 8 = carry, flag_V bit 7 = overflow) */
+/* Emit: clear V and C flags.
+ * Musashi: v_flag=0 means no overflow, c_flag=0 means no carry. */
 static void emit_clear_vc(void)
 {
 	EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
 	EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_C, REG_CTX));
 }
 
-/* Emit: set carry flag from SLTU result (0 or 1) -> FAME wants bit 8 */
+/* Emit: set carry flag from SLTU result (0 or 1).
+ * Both Musashi and FAME store carry at bit 8 (CFLAG_SET = 0x100).
+ * SLTU produces 0/1, shift left by 8 → 0/0x100.
+ * Also set x_flag (extend) = same as carry for arithmetic ops. */
 static void emit_set_carry_from_sltu(int sltu_reg)
 {
-	EMIT(MIPS_SLL(sltu_reg, sltu_reg, 8)); /* shift to bit 8 */
+	EMIT(MIPS_SLL(sltu_reg, sltu_reg, 8)); /* carry at bit 8 */
 	EMIT(MIPS_SW(sltu_reg, CTX_OFF_FLAG_C, REG_CTX));
 	EMIT(MIPS_SW(sltu_reg, CTX_OFF_FLAG_X, REG_CTX));
 }
@@ -231,44 +228,31 @@ static void emit_set_carry_from_sltu(int sltu_reg)
 static void emit_load_imm32(int reg, u32 val);
 
 /*
- * C-callable fast memory access wrappers.
- * Called via JALR from DRC code. These do the map lookup in C
- * (no JIT code generation for the map check) but are still faster
- * than FAME's m68k_read16 because they skip FAME's internal overhead.
+ * C-callable memory access wrappers for DRC-generated code.
+ * Called via JALR from compiled blocks.  These call MVS64's full
+ * memory access path (m68kinline.h fast paths + hw.c slow paths),
+ * including the WORK_RAM / P-ROM inline checks.
  *
- * These are NOT static because they're called from generated code.
+ * NOT static — their addresses are embedded in generated MIPS code.
  */
 u32 drc_read16(u32 a)
 {
-	a &= 0x00fffffe;
-	uptr v = m68k_read16_map[a >> M68K_MEM_SHIFT];
-	if (v & MAP_FLAG)
-		return ((cpu68k_read_f *)(v << 1))(a);
-	return *(u16 *)((v << 1) + a);
+	return m68k_read_memory_16(a & 0xFFFFFF);
 }
 
 u32 drc_read32(u32 a)
 {
-	a &= 0x00fffffc;
-	u32 hi = drc_read16(a);
-	u32 lo = drc_read16(a + 2);
-	return (hi << 16) | lo;
+	return m68k_read_memory_32(a & 0xFFFFFF);
 }
 
 void drc_write16(u32 a, u32 d)
 {
-	a &= 0x00fffffe;
-	uptr v = m68k_write16_map[a >> M68K_MEM_SHIFT];
-	if (v & MAP_FLAG)
-		((cpu68k_write_f *)(v << 1))(a, d);
-	else
-		*(u16 *)((v << 1) + a) = d;
+	m68k_write_memory_16(a & 0xFFFFFF, d);
 }
 
 void drc_write32(u32 a, u32 d)
 {
-	drc_write16(a, d >> 16);
-	drc_write16(a + 2, d & 0xffff);
+	m68k_write_memory_32(a & 0xFFFFFF, d);
 }
 
 /* Emit: call drc_read16. a0 = address. Result in v0. */
@@ -325,277 +309,30 @@ static void emit_drc_write32(void)
 }
 
 /*
- * Safe memory access via PicoDrive's top-level functions.
- * Calls m68k_read16/read32/write16/write32 which handle the
- * memory map lookup internally. Input: a0=addr, a1=data(writes).
- * Output: v0=result(reads). Saves/restores s-regs around call.
+ * "Safe" memory access — just aliases for the drc_* emitters.
+ * PicoDrive had separate safe/inline/fast paths; in MVS64 all paths
+ * go through the same C wrappers (which already contain the inline
+ * WORK_RAM/P-ROM fast-path from m68kinline.h).
  */
-static void emit_safe_read16(void)
-{
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffe));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_read16);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-}
-
-static void emit_safe_read32(void)
-{
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffc));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_read32);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-}
-
-static void emit_safe_write16(void)
-{
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffe));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_write16);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-}
-
-static void emit_safe_write32(void)
-{
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffc));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_write32);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-}
+#define emit_safe_read16  emit_drc_read16
+#define emit_safe_read32  emit_drc_read32
+#define emit_safe_write16 emit_drc_write16
+#define emit_safe_write32 emit_drc_write32
 
 /*
- * Inline fast-path memory access using PicoDrive's memory maps.
- * For ROM/RAM (MAP_FLAG clear): direct load/store, no function call.
- * For I/O (MAP_FLAG set): fall back to m68k_read/write functions.
+ * Inline fast-path emitters — currently all route to drc_* C wrappers.
+ * MVS64's m68k_read_memory_*/m68k_write_memory_* already contain the
+ * WORK_RAM/P-ROM inline fast-paths from m68kinline.h, so no MAP_FLAG
+ * logic is needed at the MIPS emission level.
  *
- * Uses patch_branch() for all forward branches — no hand-counted offsets.
- *
- * Input: a0 = 68k address (caller masks to 24 bits)
- * Output: v0 = read value (reads), nothing (writes: a1 = data)
- * Clobbers: REG_TMP3, REG_TMP4, a0
+ * TODO: for Phase 2, emit inline bank-check MIPS (check bank 1 for
+ * WORK_RAM direct access) to avoid the C function call overhead on
+ * the hottest path.
  */
-static void emit_inline_read16(void)
-{
-	/* a0 &= 0x00fffffe (24-bit mask + word-align) */
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffe));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-
-	/* REG_TMP3 = m68k_read16_map[a0 >> 16] */
-	emit_load_imm32(REG_TMP3, (u32)(uptr)m68k_read16_map);
-	EMIT(MIPS_SRL(REG_TMP4, 4, 16));
-	EMIT(MIPS_SLL(REG_TMP4, REG_TMP4, 2));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, REG_TMP4));
-	EMIT(MIPS_LW(REG_TMP3, 0, REG_TMP3));
-
-	/* Check MAP_FLAG (top bit). If set -> slow path */
-	EMIT(MIPS_SRL(REG_TMP4, REG_TMP3, 31));
-	u32 *to_slow = emit_branch_placeholder_bne(REG_TMP4, Z0);
-
-	/* === Fast path: direct memory load === */
-	EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 1));   /* base = v << 1 */
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, 4));  /* addr = base + a0 */
-	EMIT(MIPS_INSN(37, REG_TMP3, 2, 0, 0, 0)); /* LHU v0, 0(REG_TMP3) */
-	u32 *skip_slow = emit_branch_placeholder_beq(Z0, Z0); /* unconditional skip */
-
-	/* === Slow path: call m68k_read16 === */
-	patch_branch(to_slow); /* slow path starts here */
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_read16);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09)); /* JALR */
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-
-	/* === Both paths converge here, result in v0 === */
-	patch_branch(skip_slow);
-}
-
-static void emit_inline_read32(void)
-{
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffc));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-
-	emit_load_imm32(REG_TMP3, (u32)(uptr)m68k_read16_map);
-	EMIT(MIPS_SRL(REG_TMP4, 4, 16));
-	EMIT(MIPS_SLL(REG_TMP4, REG_TMP4, 2));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, REG_TMP4));
-	EMIT(MIPS_LW(REG_TMP3, 0, REG_TMP3));
-
-	EMIT(MIPS_SRL(REG_TMP4, REG_TMP3, 31));
-	u32 *to_slow = emit_branch_placeholder_bne(REG_TMP4, Z0);
-
-	/* Fast path: LW */
-	EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 1));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, 4));
-	EMIT(MIPS_LW(2, 0, REG_TMP3)); /* LW v0, 0(REG_TMP3) */
-	u32 *skip_slow = emit_branch_placeholder_beq(Z0, Z0);
-
-	/* Slow path */
-	patch_branch(to_slow);
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_read32);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-
-	patch_branch(skip_slow);
-}
-
-static void emit_inline_write16(void)
-{
-	/* a0=addr, a1=data. Save a1 in s-reg territory (stack) for slow path */
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffe));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-
-	emit_load_imm32(REG_TMP3, (u32)(uptr)m68k_write16_map);
-	EMIT(MIPS_SRL(REG_TMP4, 4, 16));
-	EMIT(MIPS_SLL(REG_TMP4, REG_TMP4, 2));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, REG_TMP4));
-	EMIT(MIPS_LW(REG_TMP3, 0, REG_TMP3));
-
-	EMIT(MIPS_SRL(REG_TMP4, REG_TMP3, 31));
-	u32 *to_slow = emit_branch_placeholder_bne(REG_TMP4, Z0);
-
-	/* Fast path: SH */
-	EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 1));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, 4));
-	EMIT(MIPS_INSN(41, REG_TMP3, 5, 0, 0, 0)); /* SH a1, 0(REG_TMP3) */
-	u32 *skip_slow = emit_branch_placeholder_beq(Z0, Z0);
-
-	/* Slow path */
-	patch_branch(to_slow);
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_write16);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-
-	patch_branch(skip_slow);
-}
-
-static void emit_inline_write32(void)
-{
-	EMIT(MIPS_LUI(REG_TMP4, 0x00ff));
-	EMIT(MIPS_ORI(REG_TMP4, REG_TMP4, 0xfffc));
-	EMIT(MIPS_AND(4, 4, REG_TMP4));
-
-	emit_load_imm32(REG_TMP3, (u32)(uptr)m68k_write16_map);
-	EMIT(MIPS_SRL(REG_TMP4, 4, 16));
-	EMIT(MIPS_SLL(REG_TMP4, REG_TMP4, 2));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, REG_TMP4));
-	EMIT(MIPS_LW(REG_TMP3, 0, REG_TMP3));
-
-	EMIT(MIPS_SRL(REG_TMP4, REG_TMP3, 31));
-	u32 *to_slow = emit_branch_placeholder_bne(REG_TMP4, Z0);
-
-	/* Fast path: SW */
-	EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 1));
-	EMIT(MIPS_ADDU(REG_TMP3, REG_TMP3, 4));
-	EMIT(MIPS_SW(5, 0, REG_TMP3)); /* SW a1, 0(REG_TMP3) */
-	u32 *skip_slow = emit_branch_placeholder_beq(Z0, Z0);
-
-	/* Slow path */
-	patch_branch(to_slow);
-	EMIT(MIPS_ADDIU(SP, SP, -8));
-	EMIT(MIPS_SW(REG_CTX, 0, SP));
-	EMIT(MIPS_SW(REG_CYCLES, 4, SP));
-	emit_load_imm32(REG_TMP4, (u32)(uptr)m68k_write32);
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-	EMIT(MIPS_LW(REG_CTX, 0, SP));
-	EMIT(MIPS_LW(REG_CYCLES, 4, SP));
-	EMIT(MIPS_ADDIU(SP, SP, 8));
-
-	patch_branch(skip_slow);
-}
-
-/* Emit: call a C function. addr in a0 already. Clobbers t-regs.
- * We save/restore s-regs around the call since callee may clobber them.
- * func_ptr is the address of the read/write function from M68K_CONTEXT. */
-static void emit_call_read32(int ctx_offset)
-{
-	/* Load function pointer from context */
-	EMIT(MIPS_LW(REG_TMP4, ctx_offset, REG_CTX));
-	/* JALR t4 */
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09)); /* JALR ra, t4 */
-	EMIT(MIPS_NOP); /* delay slot */
-	/* Result is in v0 (reg 2) */
-}
-
-static void emit_call_read16(int ctx_offset)
-{
-	EMIT(MIPS_LW(REG_TMP4, ctx_offset, REG_CTX));
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-}
-
-static void emit_call_write32(int ctx_offset)
-{
-	/* a0=addr already set, a1=data already set */
-	EMIT(MIPS_LW(REG_TMP4, ctx_offset, REG_CTX));
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-}
-
-static void emit_call_write16(int ctx_offset)
-{
-	EMIT(MIPS_LW(REG_TMP4, ctx_offset, REG_CTX));
-	EMIT(MIPS_INSN(0, REG_TMP4, 0, LR, 0, 0x09));
-	EMIT(MIPS_NOP);
-}
-
-/* Context offsets for memory access function pointers */
-#define CTX_OFF_READ_BYTE   (offsetof(M68K_CONTEXT, read_byte))
-#define CTX_OFF_READ_WORD   (offsetof(M68K_CONTEXT, read_word))
-#define CTX_OFF_READ_LONG   (offsetof(M68K_CONTEXT, read_long))
-#define CTX_OFF_WRITE_BYTE  (offsetof(M68K_CONTEXT, write_byte))
-#define CTX_OFF_WRITE_WORD  (offsetof(M68K_CONTEXT, write_word))
-#define CTX_OFF_WRITE_LONG  (offsetof(M68K_CONTEXT, write_long))
+#define emit_inline_read16  emit_drc_read16
+#define emit_inline_read32  emit_drc_read32
+#define emit_inline_write16 emit_drc_write16
+#define emit_inline_write32 emit_drc_write32
 
 /* Emit: load immediate 32-bit value into register */
 static void emit_load_imm32(int reg, u32 val)
@@ -612,7 +349,8 @@ static void emit_load_imm32(int reg, u32 val)
 	}
 }
 
-/* OLD INLINE FUNCTIONS REMOVED - using new patch-based versions above */
+/* Old PicoDrive MAP_FLAG inline functions removed — MVS64 uses C wrappers.
+ * See emit_inline_read16 et al. macros above. */
 #if 0
 static void OLD_emit_inline_read16(void)
 {
@@ -938,7 +676,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			emit_update_nz_long(REG_TMP2);
 			/* C = carry, X = carry (simplified: use SLTU) */
 			EMIT(MIPS_SLTU(REG_TMP3, REG_TMP2, REG_TMP0));
-			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_X, REG_CTX));
 			/* V = overflow (simplified) */
@@ -965,7 +703,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			emit_update_nz_long(REG_TMP2);
 			/* C = borrow */
 			EMIT(MIPS_SLTU(REG_TMP3, REG_TMP1, REG_TMP0));
-			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_X, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
@@ -990,7 +728,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			/* Don't store result - just set flags */
 			emit_update_nz_long(REG_TMP2);
 			EMIT(MIPS_SLTU(REG_TMP3, REG_TMP1, REG_TMP0));
-			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
 			*cycles_out = 6;
@@ -1150,7 +888,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			emit_store_dreg(ea_reg, REG_TMP1);
 			emit_update_nz_long(REG_TMP1);
 			EMIT(MIPS_SLTU(REG_TMP2, REG_TMP1, REG_TMP0));
-			EMIT(MIPS_SLL(REG_TMP2, REG_TMP2, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP2, REG_TMP2, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP2, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(REG_TMP2, CTX_OFF_FLAG_X, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
@@ -1165,7 +903,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			emit_update_nz_long(REG_TMP1);
 			emit_load_imm32(REG_TMP2, data);
 			EMIT(MIPS_SLTU(REG_TMP2, REG_TMP0, REG_TMP2));
-			EMIT(MIPS_SLL(REG_TMP2, REG_TMP2, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP2, REG_TMP2, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP2, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(REG_TMP2, CTX_OFF_FLAG_X, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
@@ -1347,7 +1085,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			emit_store_dreg(ea_reg, REG_TMP2);
 			emit_update_nz_long(REG_TMP2);
 			EMIT(MIPS_SLTU(REG_TMP3, REG_TMP0, REG_TMP1));
-			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_X, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
@@ -1360,7 +1098,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			emit_store_dreg(ea_reg, REG_TMP2);
 			emit_update_nz_long(REG_TMP2);
 			EMIT(MIPS_SLTU(REG_TMP3, REG_TMP2, REG_TMP0));
-			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_X, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
@@ -1372,7 +1110,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 			EMIT(MIPS_SUBU(REG_TMP2, REG_TMP0, REG_TMP1));
 			emit_update_nz_long(REG_TMP2);
 			EMIT(MIPS_SLTU(REG_TMP3, REG_TMP0, REG_TMP1));
-			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP3, REG_TMP3, 8)); /* carry at bit 8 (CFLAG_SET) */
 			EMIT(MIPS_SW(REG_TMP3, CTX_OFF_FLAG_C, REG_CTX));
 			EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
 			*cycles_out = 14;
@@ -1430,7 +1168,7 @@ static int compile_one_insn(u32 pc, int *cycles_out)
 		else
 			EMIT(MIPS_SRL(REG_TMP2, REG_TMP0, count - 1));
 		EMIT(MIPS_ANDI(REG_TMP2, REG_TMP2, 1));
-			EMIT(MIPS_SLL(REG_TMP2, REG_TMP2, 8)); /* FAME: carry at bit 8 */
+			EMIT(MIPS_SLL(REG_TMP2, REG_TMP2, 8)); /* carry at bit 8 (CFLAG_SET) */
 		EMIT(MIPS_SW(REG_TMP2, CTX_OFF_FLAG_C, REG_CTX));
 		EMIT(MIPS_SW(REG_TMP2, CTX_OFF_FLAG_X, REG_CTX));
 		EMIT(MIPS_SW(Z0, CTX_OFF_FLAG_V, REG_CTX));
@@ -1472,7 +1210,7 @@ static drc68k_block_t *compile_block(u32 addr_68k)
 	EMIT(MIPS_SW(18, 8, SP));   /* save s2 */
 	EMIT(MIPS_SW(LR, 12, SP));  /* save ra */
 
-	/* a0 = M68K_CONTEXT*, a1 = cycles */
+	/* a0 = m68ki_cpu_core*, a1 = cycles */
 	EMIT(MIPS_ADDU(REG_CTX, 4, Z0));    /* s0 = a0 (ctx) */
 	EMIT(MIPS_ADDU(REG_CYCLES, 5, Z0));  /* s2 = a1 (cycles) */
 
@@ -1524,8 +1262,8 @@ static drc68k_block_t *compile_block(u32 addr_68k)
 	EMIT(MIPS_JR(LR));
 	EMIT(MIPS_NOP); /* branch delay slot */
 
-	/* Flush I-cache for the generated code */
-	cache_flush_d_inval_i(code_start, (u8 *)tcache_ptr);
+	/* Flush caches so the CPU can execute the generated code */
+	host_instructions_updated(code_start, (u8 *)tcache_ptr, 0);
 
 	block->insn_count = insn_count;
 	block->code_size = (u8 *)tcache_ptr - code_start;
@@ -1548,12 +1286,10 @@ void drc68k_init(void)
 	memset(&drc68k, 0, sizeof(drc68k));
 	memset(drc68k.hash, -1, sizeof(drc68k.hash));
 
-	drc68k.cache = (u8 *)plat_mem_get_for_drc(DRC68K_CACHE_SIZE);
+	drc68k.cache = (u8 *)malloc(DRC68K_CACHE_SIZE);
 	if (!drc68k.cache) {
-		drc68k.cache = (u8 *)malloc(DRC68K_CACHE_SIZE);
-	}
-	if (!drc68k.cache) {
-		elprintf(EL_STATUS, "drc68k: FATAL: cannot allocate code cache");
+		debugf("[DRC] FATAL: cannot allocate %d KB code cache\n",
+			DRC68K_CACHE_SIZE / 1024);
 		return;
 	}
 
@@ -1561,9 +1297,7 @@ void drc68k_init(void)
 	drc68k.cache_end = drc68k.cache + DRC68K_CACHE_SIZE;
 	tcache_ptr = (u32 *)drc68k.cache;
 
-	plat_mem_set_exec(drc68k.cache, DRC68K_CACHE_SIZE);
-
-	elprintf(EL_STATUS, "drc68k: initialized, %d KB code cache at %p",
+	debugf("[DRC] initialized, %d KB code cache at %p\n",
 		DRC68K_CACHE_SIZE / 1024, drc68k.cache);
 }
 
@@ -1589,7 +1323,7 @@ void drc68k_cleanup(void)
 	}
 }
 
-int drc68k_execute(M68K_CONTEXT *ctx, u32 addr, int cycles_max)
+int drc68k_execute(u32 addr, int cycles_max)
 {
 	int h = drc68k_hash(addr);
 	drc68k_block_t *block = NULL;
@@ -1621,10 +1355,12 @@ int drc68k_execute(M68K_CONTEXT *ctx, u32 addr, int cycles_max)
 		return -1;
 	}
 
-	/* Execute the compiled block */
-	typedef int (*block_func)(M68K_CONTEXT *ctx, int cycles);
+	/* Execute the compiled block.
+	 * Block ABI: a0 = pointer to m68ki_cpu_core, a1 = cycles budget.
+	 * Returns: v0 = cycles consumed by the block. */
+	typedef int (*block_func)(m68ki_cpu_core *cpu, int cycles);
 	block_func fn = (block_func)block->code;
-	cycles_used = fn(ctx, cycles_max);
+	cycles_used = fn(&m68ki_cpu, cycles_max);
 
 	drc68k.blocks_executed++;
 	return cycles_used;

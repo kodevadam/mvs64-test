@@ -264,6 +264,11 @@ int main(int argc, char *argv[]) {
 	m68k_init();
 	#endif
 
+	#ifdef USE_DRC
+	extern void drc68k_init(void);
+	drc68k_init();
+	#endif
+
 	hw_init();
 	g_clock = 0;
 

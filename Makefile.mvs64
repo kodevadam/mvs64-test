@@ -58,7 +58,18 @@ HLE_GEN_H =
 HLE_ALL   =
 endif
 
-src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C)
+# 68K dynamic recompiler (JIT).  USE_DRC=1 compiles 68K basic blocks to
+# native MIPS III at runtime.  Falls back to the interpreter for unsupported
+# opcodes.  Can coexist with USE_HLE (HLE gets priority for its static PCs,
+# DRC covers everything else).
+ifdef USE_DRC
+src_drc = cpu/drc/drc68k.c
+CFLAGS += -DUSE_DRC
+else
+src_drc =
+endif
+
+src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C) $(src_drc)
 asm = tlb_vector.S
 rsp = rsp_video.S
 obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.o)
