@@ -124,22 +124,219 @@ static void z80_port_write(void *ctx, uint16_t port, uint8_t val)
  *   $B0-$B7: FM ch2/ch4 feedback/algorithm
  */
 
+/* ---- FM Operator / Channel state (CPU-side) ---- */
+
+/* Detune table (same as YM2612) */
+static const int32_t dt_tab[4 * 32] = {
+/* DT0 */ 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+/* DT1 */ 0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,3,3,3,4,4,4,5,5,6,6,7,8,8,8,8,
+/* DT2 */ 1,1,1,1,2,2,2,2,2,3,3,3,4,4,4,5,5,6,6,7,8,8,9,10,11,12,13,14,16,16,16,16,
+/* DT3 */ 2,2,2,2,2,3,3,3,4,4,4,5,5,6,6,7,8,8,9,10,11,12,13,14,16,17,19,20,22,22,22,22
+};
+
+/* Frequency number to phase increment table.
+ * fn_table[fnum] = (fnum * 2^20 / (144 * 2)) for the base octave. */
+static uint32_t fn_table[2048];
+static int fn_table_built = 0;
+
+static void build_fn_table(void)
+{
+	if (fn_table_built) return;
+	for (int i = 0; i < 2048; i++) {
+		/* YM2610 formula: phase_inc = fnum * 2^(block-1) / (144/2) */
+		fn_table[i] = (uint32_t)((double)i * 64.0 / 144.0 * 65536.0);
+	}
+	fn_table_built = 1;
+}
+
+/* Algorithm routing decomposition table.
+ * For each of 8 algorithms, gives: c1_mod, m2_mod, c2_mod, out_flags, mem_src */
+static const uint8_t algo_table[8][5] = {
+	/* algo 0: M1→C1→M2→C2 */       {1, 1, 1, 8,  1},
+	/* algo 1: (M1+C1)→M2→C2 */     {0, 1, 1, 8,  2},
+	/* algo 2: (M1+(C1→M2))→C2 */   {0, 0, 3, 8,  3},
+	/* algo 3: ((M1→C1)+M2)→C2 */   {1, 0, 1, 8,  1},
+	/* algo 4: (M1→C1)+(M2→C2) */   {1, 0, 1, 12, 0},
+	/* algo 5: M1→(C1+M2+C2) */     {1, 1, 1, 14, 0},
+	/* algo 6: (M1→C1)+M2+C2 */     {1, 0, 0, 14, 0},
+	/* algo 7: M1+C1+M2+C2 */       {0, 0, 0, 15, 0},
+};
+
+/* Per-operator state */
+typedef struct {
+	uint8_t  dt;       /* detune (0-7) */
+	uint8_t  mul;      /* multiply (0-15) */
+	uint8_t  tl;       /* total level (0-127, attenuation in 0.75dB steps) */
+	uint8_t  ks;       /* key scale (0-3) */
+	uint8_t  ar;       /* attack rate (0-31) */
+	uint8_t  d1r;      /* decay 1 rate (0-31) */
+	uint8_t  d2r;      /* decay 2 rate (0-31) */
+	uint8_t  rr;       /* release rate (0-15) */
+	uint8_t  sl;       /* sustain level (0-15) */
+	uint8_t  key_on;   /* key state */
+} ym_slot_t;
+
+/* Per-channel state */
+typedef struct {
+	ym_slot_t slot[4];   /* 4 operators: M1(0), C1(1), M2(2), C2(3) */
+	uint16_t  fnum;      /* frequency number (11 bits) */
+	uint8_t   block;     /* block/octave (3 bits) */
+	uint8_t   fb;        /* feedback (0-7) */
+	uint8_t   algo;      /* algorithm (0-7) */
+	uint8_t   active;    /* any key on? */
+} ym_chan_t;
+
+static ym_chan_t ym_ch[4]; /* 4 FM channels for YM2610 */
+
+/* Map operator register offset to slot index.
+ * YM2610 slot ordering: 0→M1, 1→M2, 2→C1, 3→C2
+ * (different from logical order — inherited from OPN family) */
+static const int slot_map[4] = { 0, 2, 1, 3 };
+
+/* Update the rsp_fm_state for one channel from CPU-side state */
+static void update_fm_channel(int ch_idx)
+{
+	ym_chan_t *ch = &ym_ch[ch_idx];
+	struct rsp_fm_chan *rch = &fm_state.ch[ch_idx];
+
+	build_fn_table();
+
+	/* Frequency → phase increment for each operator */
+	uint32_t base_inc = fn_table[ch->fnum & 0x7FF] >> (7 - ch->block);
+
+	for (int op = 0; op < 4; op++) {
+		ym_slot_t *sl = &ch->slot[op];
+
+		/* Apply detune */
+		int dt_idx = (sl->dt & 3) * 32 + (ch->fnum >> 7);
+		int32_t dt_val = dt_tab[dt_idx];
+		if (sl->dt & 4) dt_val = -dt_val;
+
+		/* Apply multiply */
+		uint32_t inc = base_inc;
+		if (sl->mul) inc = (inc * sl->mul) >> 0;
+		else         inc = inc >> 1;
+		inc += dt_val;
+
+		rch->phase[op] = rch->phase[op]; /* preserve running phase */
+		rch->incr[op] = inc;
+
+		/* Volume: total level → attenuation.
+		 * For now, use TL directly as envelope value.
+		 * Full envelope (ADSR) will modulate this per-sample on CPU
+		 * and update vol_out before each RSP render call. */
+		if (sl->key_on)
+			rch->vol_out[op] = sl->tl << 3; /* scale TL to envelope range */
+		else
+			rch->vol_out[op] = 0x3FF; /* max attenuation = silent */
+	}
+
+	/* Algorithm routing */
+	const uint8_t *at = algo_table[ch->algo & 7];
+	rch->c1_mod    = at[0];
+	rch->m2_mod    = at[1];
+	rch->c2_mod    = at[2];
+	rch->out_flags = at[3];
+	rch->mem_src   = at[4];
+
+	/* Feedback */
+	rch->fb_shift = ch->fb ? (ch->fb + 6) : 0;
+
+	/* Channel active */
+	rch->enabled = ch->active;
+}
+
+/* Write to a FM operator register.
+ * ch_pair: 0 for channels 0/1 (port 1), 1 for channels 2/3 (port 2) */
+static void ym_write_fm_reg(int ch_pair, uint8_t addr, uint8_t val)
+{
+	int ch_offset = (addr & 0x02) ? 1 : 0; /* bit 1 selects channel within pair */
+	int ch_idx = ch_pair * 2 + ch_offset;
+	if (ch_idx >= 4) return;
+
+	ym_chan_t *ch = &ym_ch[ch_idx];
+
+	if (addr >= 0x30 && addr < 0xA0) {
+		/* Operator parameter registers */
+		int op_idx = slot_map[(addr >> 2) & 3];
+		ym_slot_t *sl = &ch->slot[op_idx];
+		int reg = addr & 0xF0;
+
+		switch (reg) {
+		case 0x30: /* DT / MUL */
+			sl->dt  = (val >> 4) & 7;
+			sl->mul = val & 0xF;
+			break;
+		case 0x40: /* TL */
+			sl->tl = val & 0x7F;
+			break;
+		case 0x50: /* KS / AR */
+			sl->ks = (val >> 6) & 3;
+			sl->ar = val & 0x1F;
+			break;
+		case 0x60: /* D1R (+ AM on bit 7) */
+			sl->d1r = val & 0x1F;
+			break;
+		case 0x70: /* D2R */
+			sl->d2r = val & 0x1F;
+			break;
+		case 0x80: /* SL / RR */
+			sl->sl = (val >> 4) & 0xF;
+			sl->rr = val & 0xF;
+			break;
+		}
+		update_fm_channel(ch_idx);
+
+	} else if (addr >= 0xA0 && addr < 0xB0) {
+		/* Frequency registers */
+		int freg = addr & 0x0F;
+		if (freg < 4) {
+			/* A0-A3: frequency number low 8 bits */
+			ch->fnum = (ch->fnum & 0x700) | val;
+			update_fm_channel(ch_idx);
+		} else if (freg >= 4 && freg < 8) {
+			/* A4-A7: block + frequency number high 3 bits */
+			ch->fnum = (ch->fnum & 0xFF) | ((val & 0x07) << 8);
+			ch->block = (val >> 3) & 7;
+			update_fm_channel(ch_idx);
+		}
+
+	} else if (addr >= 0xB0 && addr < 0xB8) {
+		/* B0-B3: feedback / algorithm */
+		ch->fb   = (val >> 3) & 7;
+		ch->algo = val & 7;
+		update_fm_channel(ch_idx);
+	}
+}
+
 void ym2610_write_reg1(uint8_t addr, uint8_t val)
 {
-	/* TODO: implement register decoder.
-	 * This needs to update fm_state for FM channels 1 & 3,
-	 * SSG state for channels 0-2, and ADPCM-B state. */
-	(void)addr;
-	(void)val;
+	if (addr == 0x28) {
+		/* Key on/off — applies to all channels */
+		int ch_idx = val & 0x03;
+		if (ch_idx >= 4) return;
+		ym_chan_t *ch = &ym_ch[ch_idx];
+		ch->slot[0].key_on = (val >> 4) & 1;
+		ch->slot[1].key_on = (val >> 5) & 1;
+		ch->slot[2].key_on = (val >> 6) & 1;
+		ch->slot[3].key_on = (val >> 7) & 1;
+		ch->active = (val >> 4) != 0;
+		update_fm_channel(ch_idx);
+		return;
+	}
+
+	if (addr >= 0x30)
+		ym_write_fm_reg(0, addr, val); /* channels 0 & 1 */
+
+	/* TODO: $00-$0F SSG, $10-$1F ADPCM-B, $20 LFO, $24-$27 timers */
 }
 
 void ym2610_write_reg2(uint8_t addr, uint8_t val)
 {
-	/* TODO: implement register decoder.
-	 * This needs to update fm_state for FM channels 2 & 4,
-	 * and ADPCM-A state for channels 0-5. */
-	(void)addr;
-	(void)val;
+	if (addr >= 0x30)
+		ym_write_fm_reg(1, addr, val); /* channels 2 & 3 */
+
+	/* TODO: $00-$0F ADPCM-A channels */
 }
 
 /* ---- Public API ---- */

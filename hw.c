@@ -15,23 +15,12 @@
 typedef uint16_t u_uint16_t __attribute__((aligned(1)));
 typedef uint32_t u_uint32_t __attribute__((aligned(1)));
 
-// Z80 sound CPU stub: fake the command/response protocol.
-// On real hardware, the 68K writes a command byte to 0x320000 which latches
-// in the NEO-C1 and triggers a Z80 NMI. The Z80 reads the command (port $00),
-// processes it, and writes a response byte (port $0C) that the 68K can read
-// back from 0x320000.
-//
-// Protocol details (from NeoGeo dev wiki and freemlib sound driver):
-//   Command 0x01 (slot switch): Z80 echoes 0x01 back to signal readiness.
-//       BIOS polls until it reads 0x01; timeout causes "Z80 ERROR".
-//   Command 0x02 (eyecatch BGM): No reply expected, just plays music.
-//   Command 0x03 (soft reset):   Z80 clears latch to 0x00, then restarts.
-//       No reply expected by BIOS.
-//   Other commands:               Sound drivers echo cmd | 0x80 when done.
-//       68K can poll bit 7 to detect completion.
-//
-// Without a Z80 emulator, we latch the expected response immediately.
-uint8_t z80_result = 0x01;  // Z80 "ready" value expected during BIOS boot (non-static: assembly fast-path reads it)
+// Z80 sound CPU: commands from 68K are dispatched to the Z80 via
+// sound_command() which triggers an NMI.  The Z80 runs the sound
+// driver (M1 ROM), programs the YM2610, and writes a response via
+// port $0C that the 68K reads back from 0x320000.
+#include "sound/ym2610_intf.h"
+uint8_t z80_result = 0x01;  // Z80 response latch (non-static: assembly fast-path reads it)
 
 #ifdef N64
 #define ALIGN_64K  __attribute__((aligned(64*1024)))
@@ -149,7 +138,7 @@ uint32_t read_hwio(uint32_t addr, int sz)  {
 		case 0x01: assert(sz==1); return 0xFF ^ DIPSW_FREEPLAY; // dipswitches
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
-		case 0x00: assert(sz==1); return z80_result;
+		case 0x00: assert(sz==1); z80_result = sound_result(); return z80_result;
 		case 0x01: assert(sz==1); return input_status_a_r();
 
 	} else if ((addr>>16) == 0x38) switch (addr&0xFFFF) {
@@ -190,13 +179,7 @@ void write_hwio(uint32_t addr, uint32_t val, int sz)  {
 
 	} else if ((addr>>16) == 0x32) switch (addr&0xFFFF) {
 		case 0x00: assert(sz==1);
-			// Fake Z80 command processing without a real Z80 CPU.
-			if (val == 0x01)
-				z80_result = 0x01;  // slot switch: echo 0x01 (BIOS polls for this)
-			else if (val == 0x03)
-				z80_result = 0x01;  // soft reset: Z80 clears to 0x00 then restarts as "ready" (0x01)
-			else
-				z80_result = val | 0x80;  // general commands: echo with bit 7 set
+			sound_command(val);
 			return;
 
 	} else if ((addr>>16) == 0x38) switch (addr&0xFFFF) {

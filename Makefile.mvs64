@@ -71,9 +71,16 @@ else
 src_drc =
 endif
 
-src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C) $(src_drc)
+# Sound subsystem: Z80 (CZ80) + YM2610 + RSP FM synthesis
+src_sound = sound/ym2610_intf.c sound/rsp_fm.c sound/rsp_audio.c
+$(shell mkdir -p $(BUILD_DIR)/sound $(BUILD_DIR)/cpu/cz80)
+# CZ80 is compiled separately without LTO (large generated code)
+$(BUILD_DIR)/cpu/cz80/cz80.o: CFLAGS += -O2 -fno-lto
+CFLAGS += -Icpu/cz80 -Ipico
+
+src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C) $(src_drc) $(src_sound) cpu/cz80/cz80.c
 asm = tlb_vector.S
-rsp = rsp_video.S
+rsp = rsp_video.S sound/rsp_fm.S
 obj = $(src:%.c=$(BUILD_DIR)/%.o) $(asm:%.S=$(BUILD_DIR)/%.o) $(rsp:%.S=$(BUILD_DIR)/%.o)
 
 src_makerom = mvsmakerom.c miniz.c

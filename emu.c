@@ -3,6 +3,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include "emu.h"
+#include "sound/ym2610_intf.h"
 #ifdef USE_FAME
 #include "fame_adapter.h"
 #else
@@ -270,6 +271,13 @@ int main(int argc, char *argv[]) {
 	#endif
 
 	hw_init();
+
+	/* Initialize Z80 + YM2610 sound subsystem.
+	 * The M1 ROM (Z80 sound driver) is loaded by rom_load() into
+	 * a buffer we can pass here.  TODO: wire up actual M1 ROM pointer
+	 * from roms.c once the ROM loading path includes it. */
+	sound_init(NULL, 0);
+
 	g_clock = 0;
 
 	#ifdef USE_FAME
@@ -295,6 +303,11 @@ int main(int argc, char *argv[]) {
 		uint32_t t0 = TICKS_READ();
 		#endif
 		emu_run_frame();
+
+		/* Run Z80 sound CPU for one frame's worth of cycles.
+		 * Z80 at 4 MHz, 60 fps → ~66667 cycles/frame. */
+		sound_update(Z80_CLOCK / 60);
+
 		if (!plat_poll()) break;
 
 		#ifdef N64
