@@ -12,6 +12,9 @@
 
 #include <stdio.h>
 #include <string.h>
+#ifdef N64
+#include <libdragon.h>
+#endif
 #include "ym2610_intf.h"
 #include "rsp_fm.h"
 
@@ -40,9 +43,14 @@ static uint8_t ym_addr2;  /* address port 2 latch */
 static struct rsp_fm_state __attribute__((aligned(8))) fm_state;
 static int32_t __attribute__((aligned(8))) fm_output[512]; /* max samples per frame */
 
-/* ---- Z80 memory read/write callbacks ---- */
+/* Forward declarations for YM2610 register handlers */
+static void ym2610_write_reg1(uint8_t addr, uint8_t val);
+static void ym2610_write_reg2(uint8_t addr, uint8_t val);
 
-static uint8_t z80_read(void *ctx, uint16_t addr)
+/* ---- Z80 memory read/write callbacks ---- */
+/* CZ80 signatures: read(u32) → u8, write(u32, u8) */
+
+static UINT8 z80_read(UINT32 addr)
 {
 	if (addr < Z80_ROM_SIZE)
 		return z80_rom[addr];
@@ -51,7 +59,7 @@ static uint8_t z80_read(void *ctx, uint16_t addr)
 	return 0xFF;
 }
 
-static void z80_write(void *ctx, uint16_t addr, uint8_t val)
+static void z80_write(UINT32 addr, UINT8 val)
 {
 	if (addr >= 0xF800) {
 		z80_ram[addr & (Z80_RAM_SIZE - 1)] = val;
@@ -60,7 +68,7 @@ static void z80_write(void *ctx, uint16_t addr, uint8_t val)
 
 /* ---- Z80 I/O port callbacks ---- */
 
-static uint8_t z80_port_read(void *ctx, uint16_t port)
+static UINT8 z80_port_read(UINT16 port)
 {
 	port &= 0xFF;
 	switch (port) {
@@ -76,7 +84,7 @@ static uint8_t z80_port_read(void *ctx, uint16_t port)
 	}
 }
 
-static void z80_port_write(void *ctx, uint16_t port, uint8_t val)
+static void z80_port_write(UINT16 port, UINT8 val)
 {
 	port &= 0xFF;
 	switch (port) {
@@ -309,7 +317,7 @@ static void ym_write_fm_reg(int ch_pair, uint8_t addr, uint8_t val)
 	}
 }
 
-void ym2610_write_reg1(uint8_t addr, uint8_t val)
+static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 {
 	if (addr == 0x28) {
 		/* Key on/off — applies to all channels */
@@ -331,7 +339,7 @@ void ym2610_write_reg1(uint8_t addr, uint8_t val)
 	/* TODO: $00-$0F SSG, $10-$1F ADPCM-B, $20 LFO, $24-$27 timers */
 }
 
-void ym2610_write_reg2(uint8_t addr, uint8_t val)
+static void ym2610_write_reg2(uint8_t addr, uint8_t val)
 {
 	if (addr >= 0x30)
 		ym_write_fm_reg(1, addr, val); /* channels 2 & 3 */
@@ -388,7 +396,7 @@ void sound_reset(void)
 void sound_update(int cycles)
 {
 	if (nmi_pending) {
-		Cz80_Set_NMI(&z80_cpu);
+		Cz80_Set_IRQ(&z80_cpu, IRQ_LINE_NMI, HOLD_LINE);
 		nmi_pending = 0;
 	}
 	Cz80_Exec(&z80_cpu, cycles);
