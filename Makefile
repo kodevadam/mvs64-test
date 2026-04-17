@@ -15,7 +15,7 @@ all: mv64 pctest genhle
 
 mvs64:
 	@echo "Building mvs64"
-	@make -f Makefile.mvs64 D=$(D) V=$(V) ROM=$(ROM) BIOS=$(BIOS)
+	@make -f Makefile.mvs64 D=$(D) V=$(V) ROM=$(ROM) BIOS=$(BIOS) USE_HLE=$(USE_HLE) USE_DRC=$(USE_DRC)
 
 mvs64-clean:
 	@echo "Cleaning mvs64"
