@@ -85,6 +85,74 @@ entries risks PBROM allocation failure), while draw/DMA has become a
 fresh, credible ceiling.  Frozen milestone build: `HLE_PCS = 5cba 5b50
 5152 522e 5382 53d2 5a26 5866` with `idle_skip=0x43fe` for Blazing Star.
 
+### Round 3: RDP sync trim + debugf pruning (modest)
+
+After pivoting to draw/DMA, one more small win landed:
+
+- **Drop `RdpSyncPipe()` from the per-sprite / per-palette-load / per-
+  fix-tile RDP templates in `rsp_video.S`.**  The templates previously
+  began with SyncPipe+SyncTile+SyncLoad; SyncPipe guards pipeline-
+  state transitions (combiner, blender, other-modes) that **never
+  change inside these per-primitive loops** (they're configured once
+  in `cmd_sprite_begin`).  The slot is replaced with `.quad 0` (RDP
+  NOOP) to preserve byte-exact template layout so the `lqv`/`sqv`
+  copies and byte-offset patches keep working.
+- Heavy-scene draw% dropped from 40–47% ceiling to ~24–29% in
+  comparable scenes.  FPS didn't move much because the remaining
+  floor turns out to be CPU-bound even in scenes that previously
+  looked draw-heavy.  Diagnostically valuable: confirmed the real
+  Blazing Star wall is CPU, not RDP.
+- **Commented out two hot-path `debugf`s** (`roms.c:332` PBROM cache
+  miss, `lspc.c:51` timer-IRQ program).  Other hot-path debugfs were
+  already commented; the big per-frame `[PROFILE]` / `FPS` debugfs in
+  `emu.c` are intentionally kept as measurement instrumentation.
+
+### The HLE RAM ceiling and why we didn't push genhle
+
+After round 3, we investigated whether shrinking the code genhle emits
+could unlock more than 8 HLE PCs (PBROM needs a 1 MiB-aligned
+contiguous block; each `hle_*.c` eats into the budget).
+
+A careful audit of `hle_5866.c` found the generated code is **mildly
+bloated (~10% realistic slack**, not the 25–35% an earlier pass
+estimated).  Two levers exist — coalescing `USE_CYCLES(...)` within
+basic blocks, and pruning `REG_PC` updates on non-excepting
+instructions — but both require exception-safe basic-block analysis
+in genhle, are non-trivial refactors, and the projected savings only
+unlock ~1 additional PC worth ~1 FPS on narrow scenes.  Not a
+compounding win.
+
+**Decision: bank the current state as the plateau for this round.**
+Blazing Star at 41–60 FPS on real N64 with HLE + idle-skip +
+SyncPipe trim is a legitimately strong result.  The next gamble is
+better *target selection* (re-profile and rotate the 8-PC set) or
+better *pattern coverage* in genhle (see below), not prettier
+generated code.
+
+### C-lite diagnostic (staged, not yet executed)
+
+Before any further genhle work, classify the bail-outs in the current
+hot HLE'd functions.  For each `hle_*.c` on the build machine, count:
+
+1. `goto exit` instances — JSR/BSR handoffs (already optimal),
+   absolute jumps (hard to fix), escaped forward jumps (cheap).
+2. Escaped-forward-jump stub count — `op_XXXXXXXX: { REG_PC = ...;
+   goto exit; }` at the end of each file.
+3. Total opcode count — so bail density can be computed.
+
+Diagnostic decision rule:
+- **JSR/BSR dominant** → no win available, stop.
+- **Absolute jumps dominant** → narrow payoff, moderate effort,
+  probably skip unless one specific target is very hot.
+- **Escaped forward jumps dominant** → easy size win in genhle
+  (detect dead stubs at generation time).
+- **Jump-table panics on attempted hot PCs** (`genhle.c:416`) → the
+  most leveraged coverage extension: supports whole functions that
+  can't currently be HLE'd at all.
+
+If the diagnostic surfaces a clear pattern, execute the cheapest
+matching fix.  If it's diffuse, accept the plateau.
+
 ### What did NOT work: interpreter micro-optimizations
 
 Four separate attempts to reduce per-instruction interpreter overhead were
