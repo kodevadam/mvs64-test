@@ -65,10 +65,10 @@ endif
 ifdef USE_DRC
 src_drc = cpu/drc/drc68k.c
 CFLAGS += -DUSE_DRC
+$(shell mkdir -p $(BUILD_DIR)/cpu/drc)
 $(info [DRC] USE_DRC is set, adding cpu/drc/drc68k.c)
 else
 src_drc =
-$(info [DRC] USE_DRC is NOT set)
 endif
 
 src = emu.c roms.c hw.c video.c platform_n64.c sprite_cache.c lib/rdl.c tlb_handler.c $(src_68k) $(HLE_GEN_C) $(src_drc)
