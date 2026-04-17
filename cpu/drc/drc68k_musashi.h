@@ -63,10 +63,7 @@ extern void m68k_write_memory_16(unsigned int address, unsigned int value);
 extern void m68k_write_memory_32(unsigned int address, unsigned int value);
 
 /* ROM pointers for instruction fetch during block compilation.
- * The DRC reads opcodes directly from these at compile time. */
-extern uint8_t P_ROM[];
-extern uint8_t *BIOS;
-extern uint8_t WORK_RAM[];
+ * Already declared via roms.h / hw.h (pulled in by m68kcpu.h). */
 
 /* Fetch a 68K opcode word from the ROM for compilation (not execution).
  * Uses the same bank logic as m68ki_update_fetch_base. */

@@ -321,7 +321,7 @@ static void emit_drc_write32(void)
 
 /*
  * Inline fast-path emitters — currently all route to drc_* C wrappers.
- * MVS64's m68k_read_memory_*/m68k_write_memory_* already contain the
+ * MVS64's m68k_read_memory / m68k_write_memory functions already contain the
  * WORK_RAM/P-ROM inline fast-paths from m68kinline.h, so no MAP_FLAG
  * logic is needed at the MIPS emission level.
  *
@@ -527,7 +527,10 @@ static void emit_cycle_check(int cycles, u32 *exit_label)
 static int compile_one_insn(u32 pc, int *cycles_out)
 {
 	u16 opcode = fetch_68k_word(pc);
-	int size, src_reg, dst_reg;
+	(void)0; /* unused locals silenced below */
+	int size __attribute__((unused));
+	int src_reg __attribute__((unused));
+	int dst_reg __attribute__((unused));
 
 	/* Decode the major opcode groups */
 	switch ((opcode >> 12) & 0xf) {
