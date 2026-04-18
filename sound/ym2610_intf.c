@@ -39,6 +39,43 @@ static int nmi_pending;
 static uint8_t ym_addr1;  /* address port 1 latch */
 static uint8_t ym_addr2;  /* address port 2 latch */
 
+/* YM2610 Timer state.
+ * Timer A: 10-bit, period = 72 * (1024 - TA) / 8MHz → in Z80 cycles (4 MHz): 36 * (1024 - TA)
+ * Timer B:  8-bit, period = 1152 * (256 - TB) / 8MHz → in Z80 cycles: 576 * (256 - TB) */
+static uint16_t timer_a_val;      /* 10-bit value from regs $24/$25 */
+static uint8_t  timer_b_val;      /* 8-bit value from reg $26 */
+static uint8_t  timer_ctrl;       /* reg $27: enable/load/reset */
+static int32_t  timer_a_counter;  /* cycles until next Timer A overflow */
+static int32_t  timer_b_counter;  /* cycles until next Timer B overflow */
+static uint8_t  ym_status;        /* status register (bit0=TimerA, bit1=TimerB) */
+
+#define TIMER_A_PERIOD(v)  (36 * (1024 - (v)))
+#define TIMER_B_PERIOD(v)  (576 * (256 - (v)))
+
+static void timers_advance(int cycles)
+{
+	if (timer_ctrl & 0x01) { /* Timer A enabled */
+		timer_a_counter -= cycles;
+		if (timer_a_counter <= 0) {
+			ym_status |= 0x01;
+			int period = TIMER_A_PERIOD(timer_a_val);
+			if (period <= 0) period = 1;
+			while (timer_a_counter <= 0)
+				timer_a_counter += period;
+		}
+	}
+	if (timer_ctrl & 0x02) { /* Timer B enabled */
+		timer_b_counter -= cycles;
+		if (timer_b_counter <= 0) {
+			ym_status |= 0x02;
+			int period = TIMER_B_PERIOD(timer_b_val);
+			if (period <= 0) period = 1;
+			while (timer_b_counter <= 0)
+				timer_b_counter += period;
+		}
+	}
+}
+
 /* RSP FM state (filled by CPU-side envelope updates) */
 static struct rsp_fm_state __attribute__((aligned(8))) fm_state;
 static int32_t __attribute__((aligned(16))) fm_output[512]; /* max samples per frame (16-byte aligned for cache ops) */
@@ -131,9 +168,9 @@ static UINT8 z80_port_read(UINT16 port)
 	case 0x00: /* Command from 68K (clears NMI) */
 		nmi_pending = 0;
 		return cmd_latch;
-	case 0x04: /* YM2610 status port 1 */
-		return 0x00; /* TODO: timer flags */
-	case 0x06: /* YM2610 status port 2 */
+	case 0x04: /* YM2610 status port 1 (timer flags + busy) */
+		return ym_status;
+	case 0x06: /* YM2610 status port 2 (ADPCM flags) */
 		return 0x00;
 	default:
 		return 0xFF;
@@ -393,10 +430,41 @@ static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 		return;
 	}
 
+	if (addr == 0x24) {
+		timer_a_val = (timer_a_val & 0x03) | ((uint16_t)val << 2);
+		return;
+	}
+	if (addr == 0x25) {
+		timer_a_val = (timer_a_val & 0x3FC) | (val & 0x03);
+		return;
+	}
+	if (addr == 0x26) {
+		timer_b_val = val;
+		return;
+	}
+	if (addr == 0x27) {
+		/* Timer control: bits 0-1 = enable A/B, bits 2-3 = load A/B,
+		 * bits 4-5 = reset overflow flag A/B */
+		if (val & 0x10) ym_status &= ~0x01; /* reset Timer A flag */
+		if (val & 0x20) ym_status &= ~0x02; /* reset Timer B flag */
+		if (val & 0x04) { /* load Timer A */
+			int period = TIMER_A_PERIOD(timer_a_val);
+			if (period <= 0) period = 1;
+			timer_a_counter = period;
+		}
+		if (val & 0x08) { /* load Timer B */
+			int period = TIMER_B_PERIOD(timer_b_val);
+			if (period <= 0) period = 1;
+			timer_b_counter = period;
+		}
+		timer_ctrl = val & 0x03;
+		return;
+	}
+
 	if (addr >= 0x30)
 		ym_write_fm_reg(0, addr, val); /* channels 0 & 1 */
 
-	/* TODO: $00-$0F SSG, $10-$1F ADPCM-B, $20 LFO, $24-$27 timers */
+	/* TODO: $00-$0F SSG, $10-$1F ADPCM-B, $20 LFO */
 }
 
 static void ym2610_write_reg2(uint8_t addr, uint8_t val)
@@ -416,6 +484,13 @@ void sound_init(const uint8_t *rom, int rom_size)
 	memset(z80_rom, 0, sizeof(z80_rom));
 	memset(z80_ram, 0, sizeof(z80_ram));
 	memset(&fm_state, 0, sizeof(fm_state));
+
+	timer_a_val = 0;
+	timer_b_val = 0;
+	timer_ctrl = 0;
+	timer_a_counter = 0;
+	timer_b_counter = 0;
+	ym_status = 0;
 
 	z80_has_rom = 0;
 	if (rom && rom_size > 0) {
@@ -472,7 +547,15 @@ void sound_update(int cycles)
 		nmi_pending = 0;
 		stat_nmis_fired++;
 	}
-	Cz80_Exec(&z80_cpu, cycles);
+
+	/* Run Z80 in chunks so timers fire mid-frame.
+	 * 4000 cycles ≈ 1 ms — enough granularity for Timer A/B. */
+	while (cycles > 0) {
+		int chunk = (cycles < 4000) ? cycles : 4000;
+		timers_advance(chunk);
+		Cz80_Exec(&z80_cpu, chunk);
+		cycles -= chunk;
+	}
 }
 
 void sound_command(uint8_t cmd)
