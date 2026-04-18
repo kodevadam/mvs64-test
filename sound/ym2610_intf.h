@@ -58,4 +58,7 @@ uint8_t sound_result(void);
  * Returns number of samples generated. */
 int sound_render(int16_t *buf, int max_samples);
 
+/* Dump diagnostic counters (command count, register writes, etc.) */
+void sound_debug_stats(void);
+
 #endif /* YM2610_INTF_H */

@@ -43,6 +43,28 @@ static uint8_t ym_addr2;  /* address port 2 latch */
 static struct rsp_fm_state __attribute__((aligned(8))) fm_state;
 static int32_t __attribute__((aligned(16))) fm_output[512]; /* max samples per frame (16-byte aligned for cache ops) */
 
+/* Diagnostic counters */
+static uint32_t stat_cmd_count;      /* 68K commands sent to Z80 */
+static uint32_t stat_reg1_writes;    /* YM2610 port 1 register writes */
+static uint32_t stat_reg2_writes;    /* YM2610 port 2 register writes */
+static uint32_t stat_keyon_writes;   /* Register $28 writes */
+static uint32_t stat_frames;         /* sound_render calls */
+
+void sound_debug_stats(void)
+{
+#ifdef N64
+	debugf("[SND] cmd=%lu reg1=%lu reg2=%lu keyon=%lu frames=%lu ch0.en=%d ch0.incr=%lx ch0.vol=%x\n",
+		(unsigned long)stat_cmd_count,
+		(unsigned long)stat_reg1_writes,
+		(unsigned long)stat_reg2_writes,
+		(unsigned long)stat_keyon_writes,
+		(unsigned long)stat_frames,
+		fm_state.ch[0].enabled,
+		(unsigned long)fm_state.ch[0].incr[0],
+		fm_state.ch[0].vol_out[0]);
+#endif
+}
+
 /* Forward declarations for YM2610 register handlers */
 static void ym2610_write_reg1(uint8_t addr, uint8_t val);
 static void ym2610_write_reg2(uint8_t addr, uint8_t val);
@@ -319,7 +341,9 @@ static void ym_write_fm_reg(int ch_pair, uint8_t addr, uint8_t val)
 
 static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 {
+	stat_reg1_writes++;
 	if (addr == 0x28) {
+		stat_keyon_writes++;
 		/* Key on/off — applies to all channels */
 		int ch_idx = val & 0x03;
 		if (ch_idx >= 4) return;
@@ -341,6 +365,7 @@ static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 
 static void ym2610_write_reg2(uint8_t addr, uint8_t val)
 {
+	stat_reg2_writes++;
 	if (addr >= 0x30)
 		ym_write_fm_reg(1, addr, val); /* channels 2 & 3 */
 
@@ -366,6 +391,13 @@ void sound_init(const uint8_t *rom, int rom_size)
 		int copy_size = rom_size < Z80_ROM_SIZE ? rom_size : Z80_ROM_SIZE;
 		memcpy(z80_rom, rom, copy_size);
 		z80_has_rom = 1;
+#ifdef N64
+		debugf("[SND] sound_init: M1 ROM loaded, %d bytes\n", copy_size);
+#endif
+	} else {
+#ifdef N64
+		debugf("[SND] sound_init: NO M1 ROM — Z80 disabled\n");
+#endif
 	}
 
 	/* Initialize CZ80 */
@@ -412,6 +444,7 @@ void sound_update(int cycles)
 
 void sound_command(uint8_t cmd)
 {
+	stat_cmd_count++;
 	cmd_latch = cmd;
 	nmi_pending = 1;
 }
@@ -427,7 +460,7 @@ uint8_t sound_result(void)
  *   2 = test buzz: alternating +/- 8000 (unmistakable, no table needed)
  *   3 = FM test: hardcoded channel setup, RSP renders (tests RSP path)
  */
-#define SOUND_DEBUG_MODE 3
+#define SOUND_DEBUG_MODE 0
 
 static void setup_test_fm_channel(void)
 {
@@ -451,6 +484,7 @@ static void setup_test_fm_channel(void)
 
 int sound_render(int16_t *buf, int max_samples)
 {
+	stat_frames++;
 	int nsamples = max_samples;
 	if (nsamples > 256) nsamples = 256;
 

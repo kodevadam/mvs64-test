@@ -337,6 +337,7 @@ int main(int argc, char *argv[]) {
 		uint32_t curtime = TICKS_READ();
 		if (TICKS_DISTANCE(fps_time, curtime) > TICKS_FROM_MS(1000)) {
 			debugf("FPS: %.1f\n", (g_frame - fps_frame) * (float)TICKS_PER_SECOND / TICKS_DISTANCE(fps_time, curtime));
+			sound_debug_stats();
 			fps_frame = g_frame;
 			fps_time = curtime;
 		}
