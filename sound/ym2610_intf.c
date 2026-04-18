@@ -511,8 +511,9 @@ static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 	}
 
 	if (addr == 0x10) {
-		/* ADPCM-B control: bit 7 = start, bit 0 = reset */
-		if (val & 0x01) ym_adpcm_status |= 0x80; /* reset sets EOS */
+		/* ADPCM-B control: bit 7 = start, bit 0 = reset.
+		 * Reset clears EOS flag; EOS is only set when playback reaches end. */
+		if (val & 0x01) ym_adpcm_status &= ~0x80; /* reset clears EOS */
 		return;
 	}
 
@@ -590,7 +591,7 @@ void sound_init(const uint8_t *rom, int rom_size)
 	timer_a_counter = 0;
 	timer_b_counter = 0;
 	ym_status = 0;
-	ym_adpcm_status = 0xBF; /* all ADPCM channels idle at init */
+	ym_adpcm_status = 0x3F; /* ADPCM-A all ended, ADPCM-B EOS clear (idle) */
 	stat_p04_nvals = 0;
 	port_trace_n = 0;
 	memset(stat_port_rhist, 0, sizeof(stat_port_rhist));
