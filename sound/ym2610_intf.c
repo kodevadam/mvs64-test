@@ -605,6 +605,11 @@ void sound_init(const uint8_t *rom, int rom_size)
 			copy_size,
 			z80_rom[0], z80_rom[1], z80_rom[2], z80_rom[3],
 			z80_rom[4], z80_rom[5], z80_rom[6], z80_rom[7]);
+		/* Dump ROM around the polling loop at PC $01C0-$01EF */
+		debugf("[SND] ROM@01c0:");
+		for (int i = 0x01C0; i < 0x01F0 && i < copy_size; i++)
+			debugf(" %02x", z80_rom[i]);
+		debugf("\n");
 #endif
 	} else {
 #ifdef N64
