@@ -41,7 +41,7 @@ static uint8_t ym_addr2;  /* address port 2 latch */
 
 /* RSP FM state (filled by CPU-side envelope updates) */
 static struct rsp_fm_state __attribute__((aligned(8))) fm_state;
-static int32_t __attribute__((aligned(8))) fm_output[512]; /* max samples per frame */
+static int32_t __attribute__((aligned(16))) fm_output[512]; /* max samples per frame (16-byte aligned for cache ops) */
 
 /* Forward declarations for YM2610 register handlers */
 static void ym2610_write_reg1(uint8_t addr, uint8_t val);
@@ -492,7 +492,7 @@ int sound_render(int16_t *buf, int max_samples)
 #ifdef N64
 	rsp_fm_render(&fm_state, fm_output);
 	rspq_wait();
-	data_cache_hit_invalidate(fm_output, nsamples * sizeof(int32_t));
+	data_cache_hit_invalidate(fm_output, (nsamples * sizeof(int32_t) + 15) & ~15);
 #endif
 
 	/* Convert 32-bit mono → 16-bit stereo, scale up to be audible */
@@ -513,7 +513,7 @@ int sound_render(int16_t *buf, int max_samples)
 	rsp_fm_render(&fm_state, fm_output);
 	rspq_wait();
 	/* Invalidate cache so CPU sees RSP's DMA writes */
-	data_cache_hit_invalidate(fm_output, nsamples * sizeof(int32_t));
+	data_cache_hit_invalidate(fm_output, (nsamples * sizeof(int32_t) + 15) & ~15);
 #endif
 
 	/* Convert 32-bit mono → 16-bit stereo */
