@@ -96,6 +96,10 @@ static uint32_t stat_port_hist[256]; /* per-port OUT histogram */
 static uint32_t stat_port_rhist[256]; /* per-port IN histogram */
 static uint8_t stat_p04_vals[16];   /* first unique values written to $04 */
 static int stat_p04_nvals;
+/* Trace buffer: first 32 port write/read events with PC */
+struct port_event { uint16_t port; uint8_t val; uint8_t is_read; uint16_t pc; };
+static struct port_event port_trace[32];
+static int port_trace_n;
 static int z80_has_rom = 0;
 
 void sound_debug_stats(void)
@@ -158,8 +162,19 @@ void sound_debug_stats(void)
 	debugf("[SND] $04 vals:");
 	for (int i = 0; i < stat_p04_nvals && i < 16; i++)
 		debugf(" %02x", stat_p04_vals[i]);
-	debugf(" | tmr_ctrl=%02x tmr_a=%d tmr_b=%d status=%02x\n",
-		timer_ctrl, timer_a_val, timer_b_val, ym_status);
+	debugf(" | tmr_ctrl=%02x tmr_a=%d tmr_b=%d status=%02x adpcm=%02x\n",
+		timer_ctrl, timer_a_val, timer_b_val, ym_status, ym_adpcm_status);
+
+	/* Dump first 32 port events */
+	if (port_trace_n > 0) {
+		debugf("[SND] trace:");
+		for (int i = 0; i < port_trace_n; i++)
+			debugf(" %c%04x=%02x@%04x",
+				port_trace[i].is_read ? 'R' : 'W',
+				port_trace[i].port, port_trace[i].val,
+				port_trace[i].pc);
+		debugf("\n");
+	}
 #endif
 }
 
@@ -192,8 +207,16 @@ static void z80_write(UINT32 addr, UINT8 val)
 static UINT8 z80_port_read(UINT16 port)
 {
 	stat_port_reads++;
+	uint16_t full_port = port;
 	port &= 0xFF;
 	stat_port_rhist[port]++;
+	if (port_trace_n < 32) {
+		port_trace[port_trace_n].port = full_port;
+		port_trace[port_trace_n].val = 0;
+		port_trace[port_trace_n].is_read = 1;
+		port_trace[port_trace_n].pc = (uint16_t)Cz80_Get_Reg(&z80_cpu, CZ80_PC);
+		port_trace_n++;
+	}
 	switch (port) {
 	case 0x00: /* Command from 68K (clears NMI) */
 		nmi_pending = 0;
@@ -214,8 +237,16 @@ static UINT8 z80_port_read(UINT16 port)
 static void z80_port_write(UINT16 port, UINT8 val)
 {
 	stat_port_writes++;
+	uint16_t full_port = port;
 	port &= 0xFF;
 	stat_port_hist[port]++;
+	if (port_trace_n < 32) {
+		port_trace[port_trace_n].port = full_port;
+		port_trace[port_trace_n].val = val;
+		port_trace[port_trace_n].is_read = 0;
+		port_trace[port_trace_n].pc = (uint16_t)Cz80_Get_Reg(&z80_cpu, CZ80_PC);
+		port_trace_n++;
+	}
 	switch (port) {
 	case 0x04: /* YM2610 address port 1 */
 		ym_addr1 = val;
@@ -561,6 +592,7 @@ void sound_init(const uint8_t *rom, int rom_size)
 	ym_status = 0;
 	ym_adpcm_status = 0xBF; /* all ADPCM channels idle at init */
 	stat_p04_nvals = 0;
+	port_trace_n = 0;
 	memset(stat_port_rhist, 0, sizeof(stat_port_rhist));
 
 	z80_has_rom = 0;
