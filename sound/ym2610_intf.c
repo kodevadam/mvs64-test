@@ -347,6 +347,11 @@ static void ym2610_write_reg2(uint8_t addr, uint8_t val)
 	/* TODO: $00-$0F ADPCM-A channels */
 }
 
+/* Track whether the Z80 has a valid ROM loaded.  Without this,
+ * Cz80_Exec() would execute NOPs from an uninitialized state and
+ * potentially trip the fetch path on bad pointers. */
+static int z80_has_rom = 0;
+
 /* ---- Public API ---- */
 
 void sound_init(const uint8_t *rom, int rom_size)
@@ -356,26 +361,27 @@ void sound_init(const uint8_t *rom, int rom_size)
 	memset(z80_ram, 0, sizeof(z80_ram));
 	memset(&fm_state, 0, sizeof(fm_state));
 
+	z80_has_rom = 0;
 	if (rom && rom_size > 0) {
 		int copy_size = rom_size < Z80_ROM_SIZE ? rom_size : Z80_ROM_SIZE;
 		memcpy(z80_rom, rom, copy_size);
+		z80_has_rom = 1;
 	}
 
 	/* Initialize CZ80 */
 	Cz80_Init(&z80_cpu);
 
-	/* Set up memory map: Z80 address space is 64 KB */
-	for (int i = 0; i < CZ80_FETCH_BANK; i++) {
-		uint32_t base = i << CZ80_FETCH_SFT;
-		if (base < Z80_ROM_SIZE)
-			Cz80_Set_Fetch(&z80_cpu, base, base + (1 << CZ80_FETCH_SFT) - 1,
-				(uintptr_t)z80_rom);
-	}
+	/* Set up memory map: Z80 address space is 64 KB.
+	 * Fetch table must be set up correctly even if ROM is empty,
+	 * because Cz80_Exec() dereferences Fetch[pc >> FETCH_SFT] + pc. */
+	Cz80_Set_Fetch(&z80_cpu, 0x0000, 0xFFFF, (uintptr_t)z80_rom);
 
 	Cz80_Set_ReadB(&z80_cpu, z80_read);
 	Cz80_Set_WriteB(&z80_cpu, z80_write);
 	Cz80_Set_INPort(&z80_cpu, z80_port_read);
 	Cz80_Set_OUTPort(&z80_cpu, z80_port_write);
+
+	Cz80_Reset(&z80_cpu);
 
 	result_latch = 0x01;
 	nmi_pending = 0;
@@ -395,6 +401,8 @@ void sound_reset(void)
 
 void sound_update(int cycles)
 {
+	if (!z80_has_rom) return;  /* no sound driver loaded — skip */
+
 	if (nmi_pending) {
 		Cz80_Set_IRQ(&z80_cpu, IRQ_LINE_NMI, HOLD_LINE);
 		nmi_pending = 0;
