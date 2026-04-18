@@ -425,8 +425,29 @@ uint8_t sound_result(void)
  *   0 = normal: FM synthesis from YM2610 state via RSP
  *   1 = test tone: 440Hz sine wave directly (bypasses RSP + FM)
  *   2 = test buzz: alternating +/- 8000 (unmistakable, no table needed)
+ *   3 = FM test: hardcoded channel setup, RSP renders (tests RSP path)
  */
-#define SOUND_DEBUG_MODE 2
+#define SOUND_DEBUG_MODE 3
+
+static void setup_test_fm_channel(void)
+{
+	/* Force channel 0 into a known-playing state bypassing Z80/reg decoder.
+	 * Algorithm 7 (all 4 ops → output), all ops at low TL (loud), fixed
+	 * phase increments for a steady tone. */
+	struct rsp_fm_chan *rch = &fm_state.ch[0];
+	memset(rch, 0, sizeof(*rch));
+	for (int op = 0; op < 4; op++) {
+		rch->incr[op]    = 0x8000; /* steady phase advance ~ middle pitch */
+		rch->vol_out[op] = 0;      /* zero attenuation = full volume */
+	}
+	rch->fb_shift  = 0;
+	rch->c1_mod    = 0;  /* C1 unmodulated */
+	rch->m2_mod    = 0;  /* M2 unmodulated */
+	rch->c2_mod    = 0;  /* C2 unmodulated */
+	rch->out_flags = 0xF; /* all 4 operators → output (algo 7) */
+	rch->mem_src   = 0;
+	rch->enabled   = 1;
+}
 
 int sound_render(int16_t *buf, int max_samples)
 {
@@ -459,6 +480,28 @@ int sound_render(int16_t *buf, int max_samples)
 		if (++phase >= 25) { phase = 0; val = -val; }
 		buf[i*2+0] = val;
 		buf[i*2+1] = val;
+	}
+	return nsamples;
+
+#elif SOUND_DEBUG_MODE == 3
+	/* Hardcoded FM channel to test RSP synthesis path */
+	setup_test_fm_channel();
+	fm_state.num_samples = nsamples;
+	memset(fm_output, 0, nsamples * sizeof(int32_t));
+
+#ifdef N64
+	rsp_fm_render(&fm_state, fm_output);
+	rspq_wait();
+	data_cache_hit_invalidate(fm_output, nsamples * sizeof(int32_t));
+#endif
+
+	/* Convert 32-bit mono → 16-bit stereo, scale up to be audible */
+	for (int i = 0; i < nsamples; i++) {
+		int32_t s = fm_output[i] * 4; /* boost to hear it */
+		if (s > 32767) s = 32767;
+		if (s < -32768) s = -32768;
+		buf[i * 2 + 0] = (int16_t)s;
+		buf[i * 2 + 1] = (int16_t)s;
 	}
 	return nsamples;
 
