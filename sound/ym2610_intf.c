@@ -47,7 +47,8 @@ static uint8_t  timer_b_val;      /* 8-bit value from reg $26 */
 static uint8_t  timer_ctrl;       /* reg $27: enable/load/reset */
 static int32_t  timer_a_counter;  /* cycles until next Timer A overflow */
 static int32_t  timer_b_counter;  /* cycles until next Timer B overflow */
-static uint8_t  ym_status;        /* status register (bit0=TimerA, bit1=TimerB) */
+static uint8_t  ym_status;        /* status register 0 (bit0=TimerA, bit1=TimerB) */
+static uint8_t  ym_adpcm_status;  /* status register 1 (bit7=ADPCM-B EOS, bits0-5=ADPCM-A end) */
 
 #define TIMER_A_PERIOD(v)  (36 * (1024 - (v)))
 #define TIMER_B_PERIOD(v)  (576 * (256 - (v)))
@@ -200,7 +201,11 @@ static UINT8 z80_port_read(UINT16 port)
 	case 0x04: /* YM2610 status port 1 (timer flags + busy) */
 		return ym_status;
 	case 0x06: /* YM2610 status port 2 (ADPCM flags) */
-		return 0x00;
+		/* Bit 7: ADPCM-B EOS, Bits 0-5: ADPCM-A channel end flags.
+		 * Return all flags set = all channels idle/done.
+		 * Without this, the Z80 sound driver polls endlessly
+		 * waiting for ADPCM hardware to become ready. */
+		return ym_adpcm_status;
 	default:
 		return 0xFF;
 	}
@@ -466,6 +471,20 @@ static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 		return;
 	}
 
+	if (addr == 0x1C) {
+		/* ADPCM flag control: writing resets corresponding end flags
+		 * in status register 1 (port $06 read). */
+		if (val & 0x80) ym_adpcm_status &= ~0x80; /* reset ADPCM-B EOS */
+		if (val & 0x3F) ym_adpcm_status &= ~(val & 0x3F); /* reset ADPCM-A flags */
+		return;
+	}
+
+	if (addr == 0x10) {
+		/* ADPCM-B control: bit 7 = start, bit 0 = reset */
+		if (val & 0x01) ym_adpcm_status |= 0x80; /* reset sets EOS */
+		return;
+	}
+
 	if (addr == 0x24) {
 		timer_a_val = (timer_a_val & 0x03) | ((uint16_t)val << 2);
 		return;
@@ -506,10 +525,23 @@ static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 static void ym2610_write_reg2(uint8_t addr, uint8_t val)
 {
 	stat_reg2_writes++;
+
+	if (addr == 0x00) {
+		/* ADPCM-A dump/keyon: bit 7 = dump all, bits 0-5 = keyon mask.
+		 * Set end flags for any channels that are "started" (since we
+		 * don't actually play ADPCM, they instantly end). */
+		if (val & 0x80) {
+			ym_adpcm_status |= 0x3F; /* all ADPCM-A channels ended */
+		} else {
+			ym_adpcm_status |= (val & 0x3F); /* mark started channels as ended */
+		}
+		return;
+	}
+
 	if (addr >= 0x30)
 		ym_write_fm_reg(1, addr, val); /* channels 2 & 3 */
 
-	/* TODO: $00-$0F ADPCM-A channels */
+	/* TODO: $08-$0F ADPCM-A per-channel params, $10-$1F volumes */
 }
 
 /* ---- Public API ---- */
@@ -527,6 +559,7 @@ void sound_init(const uint8_t *rom, int rom_size)
 	timer_a_counter = 0;
 	timer_b_counter = 0;
 	ym_status = 0;
+	ym_adpcm_status = 0xBF; /* all ADPCM channels idle at init */
 	stat_p04_nvals = 0;
 	memset(stat_port_rhist, 0, sizeof(stat_port_rhist));
 
