@@ -176,18 +176,42 @@ void sound_debug_stats(void)
 		debugf("\n");
 	}
 
-	/* Dump ROM bytes around the poll loop (once) */
+	/* Search ROM for IN A,($06) = DB 06 and dump surrounding context */
 	static int rom_dumped = 0;
 	if (!rom_dumped && z80_has_rom) {
 		rom_dumped = 1;
-		debugf("[SND] ROM@01c0:");
-		for (int i = 0x01C0; i < 0x01F0; i++)
-			debugf(" %02x", z80_rom[i]);
+		/* Find all DB 06 (IN A,($06)) locations */
+		debugf("[SND] IN($06) at:");
+		for (int i = 0; i < Z80_ROM_SIZE - 1; i++) {
+			if (z80_rom[i] == 0xDB && z80_rom[i+1] == 0x06)
+				debugf(" %04x", i);
+		}
 		debugf("\n");
-		debugf("[SND] ROM@0000:");
-		for (int i = 0; i < 0x30; i++)
-			debugf(" %02x", z80_rom[i]);
+		/* Find all D3 04 (OUT ($04),A) locations */
+		debugf("[SND] OUT($04) at:");
+		for (int i = 0; i < Z80_ROM_SIZE - 1; i++) {
+			if (z80_rom[i] == 0xD3 && z80_rom[i+1] == 0x04)
+				debugf(" %04x", i);
+		}
 		debugf("\n");
+		/* Also find D3 05 (OUT ($05),A) */
+		debugf("[SND] OUT($05) at:");
+		for (int i = 0; i < Z80_ROM_SIZE - 1; i++) {
+			if (z80_rom[i] == 0xD3 && z80_rom[i+1] == 0x05)
+				debugf(" %04x", i);
+		}
+		debugf("\n");
+		/* Dump context around the first IN ($06) */
+		for (int i = 0; i < Z80_ROM_SIZE - 1; i++) {
+			if (z80_rom[i] == 0xDB && z80_rom[i+1] == 0x06) {
+				int start = (i > 16) ? i - 16 : 0;
+				debugf("[SND] ROM@%04x:", start);
+				for (int j = start; j < i + 32 && j < Z80_ROM_SIZE; j++)
+					debugf(" %02x", z80_rom[j]);
+				debugf("\n");
+				break;
+			}
+		}
 	}
 #endif
 }
