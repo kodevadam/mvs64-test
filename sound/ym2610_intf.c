@@ -223,12 +223,11 @@ static UINT8 z80_port_read(UINT16 port)
 		return cmd_latch;
 	case 0x04: /* YM2610 status port 1 (timer flags + busy) */
 		return ym_status;
-	case 0x06: /* YM2610 status port 2 (ADPCM flags) */
-		/* Bit 7: ADPCM-B EOS, Bits 0-5: ADPCM-A channel end flags.
-		 * Return all flags set = all channels idle/done.
-		 * Without this, the Z80 sound driver polls endlessly
-		 * waiting for ADPCM hardware to become ready. */
-		return ym_adpcm_status;
+	case 0x06: { /* YM2610 status port 2 (ADPCM flags) — read-and-clear */
+		uint8_t ret = ym_adpcm_status;
+		ym_adpcm_status = 0;
+		return ret;
+	}
 	default:
 		return 0xFF;
 	}
@@ -591,7 +590,7 @@ void sound_init(const uint8_t *rom, int rom_size)
 	timer_a_counter = 0;
 	timer_b_counter = 0;
 	ym_status = 0;
-	ym_adpcm_status = 0x3F; /* ADPCM-A all ended, ADPCM-B EOS clear (idle) */
+	ym_adpcm_status = 0xBF; /* ADPCM-A all ended + ADPCM-B EOS; read-and-clear */
 	stat_p04_nvals = 0;
 	port_trace_n = 0;
 	memset(stat_port_rhist, 0, sizeof(stat_port_rhist));
