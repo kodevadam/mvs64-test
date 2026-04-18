@@ -423,15 +423,8 @@ void rom_load(const char *dir) {
 		if (ok) debugf("[ROM] configure idle_skip: %x\n", rom_pc_idle_skip);
 	}
 
-	#ifdef N64
-	dir = "";
-	#endif
-	
-	srom_fn[0] = strcatalloc(dir, "s.bios");
-	srom_fn[1] = strcatalloc(dir, "s.rom");
-	crom_fn[0] = strcatalloc(dir, "c.rom");
-
-	/* Load M1 ROM (Z80 sound driver) if present */
+	/* Load M1 ROM (Z80 sound driver) if present.
+	 * Must happen before dir is cleared for dfs_open paths below. */
 	{
 		char *m1_fn = strcatalloc(dir, "m.rom");
 		FILE *mf = fopen(m1_fn, "rb");
@@ -443,9 +436,19 @@ void rom_load(const char *dir) {
 			fread(M1_ROM, 1, M1_ROM_SIZE, mf);
 			fclose(mf);
 			debugf("[ROM] loaded M1 sound ROM: %d bytes\n", M1_ROM_SIZE);
+		} else {
+			debugf("[ROM] m.rom not found at: %s\n", m1_fn);
 		}
 		free(m1_fn);
 	}
+
+	#ifdef N64
+	dir = "";
+	#endif
+
+	srom_fn[0] = strcatalloc(dir, "s.bios");
+	srom_fn[1] = strcatalloc(dir, "s.rom");
+	crom_fn[0] = strcatalloc(dir, "c.rom");
 
 	rom_cache_init();
 	srom_set_bank(0);  // Set SFIX as current
