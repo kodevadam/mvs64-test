@@ -54,6 +54,7 @@ static uint32_t stat_port_writes;    /* any Z80 OUT instruction */
 static uint32_t stat_port_reads;     /* any Z80 IN instruction */
 static uint32_t stat_ram_writes;     /* Z80 writes to RAM */
 static uint32_t stat_nmis_fired;     /* NMIs actually raised to CZ80 */
+static uint32_t stat_port_hist[256]; /* per-port OUT histogram */
 static int z80_has_rom = 0;
 
 void sound_debug_stats(void)
@@ -74,6 +75,25 @@ void sound_debug_stats(void)
 		(unsigned long)stat_keyon_writes,
 		(unsigned long)z80_pc,
 		(unsigned long)z80_sp);
+
+	/* Find top 6 ports by write count */
+	int top[6] = {-1,-1,-1,-1,-1,-1};
+	for (int i = 0; i < 256; i++) {
+		if (stat_port_hist[i] == 0) continue;
+		for (int s = 0; s < 6; s++) {
+			if (top[s] < 0 || stat_port_hist[i] > stat_port_hist[top[s]]) {
+				for (int k = 5; k > s; k--) top[k] = top[k-1];
+				top[s] = i;
+				break;
+			}
+		}
+	}
+	debugf("[SND] top ports:");
+	for (int s = 0; s < 6; s++) {
+		if (top[s] < 0) break;
+		debugf(" $%02x=%lu", top[s], (unsigned long)stat_port_hist[top[s]]);
+	}
+	debugf("\n");
 #endif
 }
 
@@ -124,6 +144,7 @@ static void z80_port_write(UINT16 port, UINT8 val)
 {
 	stat_port_writes++;
 	port &= 0xFF;
+	stat_port_hist[port]++;
 	switch (port) {
 	case 0x04: /* YM2610 address port 1 */
 		ym_addr1 = val;
