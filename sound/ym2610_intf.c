@@ -92,6 +92,9 @@ static uint32_t stat_port_reads;     /* any Z80 IN instruction */
 static uint32_t stat_ram_writes;     /* Z80 writes to RAM */
 static uint32_t stat_nmis_fired;     /* NMIs actually raised to CZ80 */
 static uint32_t stat_port_hist[256]; /* per-port OUT histogram */
+static uint32_t stat_port_rhist[256]; /* per-port IN histogram */
+static uint8_t stat_p04_vals[16];   /* first unique values written to $04 */
+static int stat_p04_nvals;
 static int z80_has_rom = 0;
 
 void sound_debug_stats(void)
@@ -125,12 +128,37 @@ void sound_debug_stats(void)
 			}
 		}
 	}
-	debugf("[SND] top ports:");
+	debugf("[SND] outW:");
 	for (int s = 0; s < 6; s++) {
 		if (top[s] < 0) break;
 		debugf(" $%02x=%lu", top[s], (unsigned long)stat_port_hist[top[s]]);
 	}
+
+	/* Find top 6 ports by read count */
+	int rtop[6] = {-1,-1,-1,-1,-1,-1};
+	for (int i = 0; i < 256; i++) {
+		if (stat_port_rhist[i] == 0) continue;
+		for (int s = 0; s < 6; s++) {
+			if (rtop[s] < 0 || stat_port_rhist[i] > stat_port_rhist[rtop[s]]) {
+				for (int k = 5; k > s; k--) rtop[k] = rtop[k-1];
+				rtop[s] = i;
+				break;
+			}
+		}
+	}
+	debugf(" | inR:");
+	for (int s = 0; s < 6; s++) {
+		if (rtop[s] < 0) break;
+		debugf(" $%02x=%lu", rtop[s], (unsigned long)stat_port_rhist[rtop[s]]);
+	}
 	debugf("\n");
+
+	/* Dump first unique values written to $04 */
+	debugf("[SND] $04 vals:");
+	for (int i = 0; i < stat_p04_nvals && i < 16; i++)
+		debugf(" %02x", stat_p04_vals[i]);
+	debugf(" | tmr_ctrl=%02x tmr_a=%d tmr_b=%d status=%02x\n",
+		timer_ctrl, timer_a_val, timer_b_val, ym_status);
 #endif
 }
 
@@ -164,6 +192,7 @@ static UINT8 z80_port_read(UINT16 port)
 {
 	stat_port_reads++;
 	port &= 0xFF;
+	stat_port_rhist[port]++;
 	switch (port) {
 	case 0x00: /* Command from 68K (clears NMI) */
 		nmi_pending = 0;
@@ -185,6 +214,13 @@ static void z80_port_write(UINT16 port, UINT8 val)
 	switch (port) {
 	case 0x04: /* YM2610 address port 1 */
 		ym_addr1 = val;
+		/* Capture first unique values for debugging */
+		if (stat_p04_nvals < 16) {
+			int dup = 0;
+			for (int i = 0; i < stat_p04_nvals; i++)
+				if (stat_p04_vals[i] == val) { dup = 1; break; }
+			if (!dup) stat_p04_vals[stat_p04_nvals++] = val;
+		}
 		break;
 	case 0x05: /* YM2610 data port 1 */
 		ym2610_write_reg1(ym_addr1, val);
@@ -491,6 +527,8 @@ void sound_init(const uint8_t *rom, int rom_size)
 	timer_a_counter = 0;
 	timer_b_counter = 0;
 	ym_status = 0;
+	stat_p04_nvals = 0;
+	memset(stat_port_rhist, 0, sizeof(stat_port_rhist));
 
 	z80_has_rom = 0;
 	if (rom && rom_size > 0) {
@@ -498,7 +536,10 @@ void sound_init(const uint8_t *rom, int rom_size)
 		memcpy(z80_rom, rom, copy_size);
 		z80_has_rom = 1;
 #ifdef N64
-		debugf("[SND] sound_init: M1 ROM loaded, %d bytes\n", copy_size);
+		debugf("[SND] sound_init: M1 ROM loaded, %d bytes, first8: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+			copy_size,
+			z80_rom[0], z80_rom[1], z80_rom[2], z80_rom[3],
+			z80_rom[4], z80_rom[5], z80_rom[6], z80_rom[7]);
 #endif
 	} else {
 #ifdef N64
