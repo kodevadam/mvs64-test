@@ -421,20 +421,56 @@ uint8_t sound_result(void)
 	return result_latch;
 }
 
+/* Audio pipeline test modes for debugging.
+ *   0 = normal: FM synthesis from YM2610 state via RSP
+ *   1 = test tone: 440Hz sine wave directly (bypasses RSP + FM)
+ *   2 = test buzz: alternating +/- 8000 (unmistakable, no table needed)
+ */
+#define SOUND_DEBUG_MODE 2
+
 int sound_render(int16_t *buf, int max_samples)
 {
 	int nsamples = max_samples;
 	if (nsamples > 256) nsamples = 256;
 
-	fm_state.num_samples = nsamples;
+#if SOUND_DEBUG_MODE == 1
+	/* 440Hz sine wave at 22050Hz: period = 50 samples */
+	static int phase = 0;
+	static const int16_t sine_lut[50] = {
+		0,     2048,  4063,  6020,  7889,  9647,  11272, 12744, 14044,
+		15157, 16068, 16766, 17241, 17488, 17500, 17277, 16820, 16134,
+		15226, 14105, 12781, 11270, 9589,  7755,  5790,  3716,  1556,
+		-667,  -2926, -5193, -7442, -9644, -11770,-13793,-15685,-17420,
+		-18974,-20323,-21447,-22327,-22948,-23298,-23370,-23160,-22668,
+		-21898,-20858,-19561,-18022,-16261
+	};
+	for (int i = 0; i < nsamples; i++) {
+		int16_t s = sine_lut[phase++ % 50];
+		buf[i*2+0] = s;
+		buf[i*2+1] = s;
+	}
+	return nsamples;
 
+#elif SOUND_DEBUG_MODE == 2
+	/* Audible square wave: flip every 25 samples → 441Hz */
+	static int phase = 0;
+	static int16_t val = 8000;
+	for (int i = 0; i < nsamples; i++) {
+		if (++phase >= 25) { phase = 0; val = -val; }
+		buf[i*2+0] = val;
+		buf[i*2+1] = val;
+	}
+	return nsamples;
+
+#else
+	fm_state.num_samples = nsamples;
 	memset(fm_output, 0, nsamples * sizeof(int32_t));
 
 #ifdef N64
 	rsp_fm_render(&fm_state, fm_output);
-	/* RSP runs async — we need to wait before reading output.
-	 * TODO: pipeline this so RSP runs while CPU does next frame's 68K. */
 	rspq_wait();
+	/* Invalidate cache so CPU sees RSP's DMA writes */
+	data_cache_hit_invalidate(fm_output, nsamples * sizeof(int32_t));
 #endif
 
 	/* Convert 32-bit mono → 16-bit stereo */
@@ -447,4 +483,5 @@ int sound_render(int16_t *buf, int max_samples)
 	}
 
 	return nsamples;
+#endif
 }
