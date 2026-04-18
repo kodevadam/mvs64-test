@@ -175,6 +175,20 @@ void sound_debug_stats(void)
 				port_trace[i].pc);
 		debugf("\n");
 	}
+
+	/* Dump ROM bytes around the poll loop (once) */
+	static int rom_dumped = 0;
+	if (!rom_dumped && z80_has_rom) {
+		rom_dumped = 1;
+		debugf("[SND] ROM@01c0:");
+		for (int i = 0x01C0; i < 0x01F0; i++)
+			debugf(" %02x", z80_rom[i]);
+		debugf("\n");
+		debugf("[SND] ROM@0000:");
+		for (int i = 0; i < 0x30; i++)
+			debugf(" %02x", z80_rom[i]);
+		debugf("\n");
+	}
 #endif
 }
 
