@@ -49,19 +49,31 @@ static uint32_t stat_reg1_writes;    /* YM2610 port 1 register writes */
 static uint32_t stat_reg2_writes;    /* YM2610 port 2 register writes */
 static uint32_t stat_keyon_writes;   /* Register $28 writes */
 static uint32_t stat_frames;         /* sound_render calls */
+static uint32_t stat_update_calls;   /* sound_update invocations */
+static uint32_t stat_port_writes;    /* any Z80 OUT instruction */
+static uint32_t stat_port_reads;     /* any Z80 IN instruction */
+static uint32_t stat_ram_writes;     /* Z80 writes to RAM */
+static uint32_t stat_nmis_fired;     /* NMIs actually raised to CZ80 */
+static int z80_has_rom = 0;
 
 void sound_debug_stats(void)
 {
 #ifdef N64
-	debugf("[SND] cmd=%lu reg1=%lu reg2=%lu keyon=%lu frames=%lu ch0.en=%d ch0.incr=%lx ch0.vol=%x\n",
+	uint32_t z80_pc = Cz80_Get_Reg(&z80_cpu, CZ80_PC);
+	uint32_t z80_sp = Cz80_Get_Reg(&z80_cpu, CZ80_SP);
+	debugf("[SND] rom=%d cmd=%lu nmi=%lu upd=%lu portW=%lu portR=%lu ramW=%lu reg1=%lu reg2=%lu keyon=%lu pc=%04lx sp=%04lx\n",
+		z80_has_rom,
 		(unsigned long)stat_cmd_count,
+		(unsigned long)stat_nmis_fired,
+		(unsigned long)stat_update_calls,
+		(unsigned long)stat_port_writes,
+		(unsigned long)stat_port_reads,
+		(unsigned long)stat_ram_writes,
 		(unsigned long)stat_reg1_writes,
 		(unsigned long)stat_reg2_writes,
 		(unsigned long)stat_keyon_writes,
-		(unsigned long)stat_frames,
-		fm_state.ch[0].enabled,
-		(unsigned long)fm_state.ch[0].incr[0],
-		fm_state.ch[0].vol_out[0]);
+		(unsigned long)z80_pc,
+		(unsigned long)z80_sp);
 #endif
 }
 
@@ -85,6 +97,7 @@ static void z80_write(UINT32 addr, UINT8 val)
 {
 	if (addr >= 0xF800) {
 		z80_ram[addr & (Z80_RAM_SIZE - 1)] = val;
+		stat_ram_writes++;
 	}
 }
 
@@ -92,6 +105,7 @@ static void z80_write(UINT32 addr, UINT8 val)
 
 static UINT8 z80_port_read(UINT16 port)
 {
+	stat_port_reads++;
 	port &= 0xFF;
 	switch (port) {
 	case 0x00: /* Command from 68K (clears NMI) */
@@ -108,6 +122,7 @@ static UINT8 z80_port_read(UINT16 port)
 
 static void z80_port_write(UINT16 port, UINT8 val)
 {
+	stat_port_writes++;
 	port &= 0xFF;
 	switch (port) {
 	case 0x04: /* YM2610 address port 1 */
@@ -372,11 +387,6 @@ static void ym2610_write_reg2(uint8_t addr, uint8_t val)
 	/* TODO: $00-$0F ADPCM-A channels */
 }
 
-/* Track whether the Z80 has a valid ROM loaded.  Without this,
- * Cz80_Exec() would execute NOPs from an uninitialized state and
- * potentially trip the fetch path on bad pointers. */
-static int z80_has_rom = 0;
-
 /* ---- Public API ---- */
 
 void sound_init(const uint8_t *rom, int rom_size)
@@ -435,9 +445,11 @@ void sound_update(int cycles)
 {
 	if (!z80_has_rom) return;  /* no sound driver loaded — skip */
 
+	stat_update_calls++;
 	if (nmi_pending) {
 		Cz80_Set_IRQ(&z80_cpu, IRQ_LINE_NMI, HOLD_LINE);
 		nmi_pending = 0;
+		stat_nmis_fired++;
 	}
 	Cz80_Exec(&z80_cpu, cycles);
 }
