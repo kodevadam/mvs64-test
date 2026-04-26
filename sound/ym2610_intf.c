@@ -225,6 +225,15 @@ static void z80_write(UINT32 addr, UINT8 val)
 		z80_ram[addr & (Z80_RAM_SIZE - 1)] = val;
 		stat_ram_writes++;
 	}
+#ifdef N64
+	/* Track init progress: log writes to key addresses */
+	static int init_trace_done = 0;
+	if (!init_trace_done && addr >= 0xFE20 && addr <= 0xFE96) {
+		debugf("[Z80W] addr=%04lx val=%02x ramW=%lu\n",
+			(unsigned long)addr, val, (unsigned long)stat_ram_writes);
+		if (stat_ram_writes > 200) init_trace_done = 1;
+	}
+#endif
 }
 
 /* ---- Z80 I/O port callbacks ---- */
