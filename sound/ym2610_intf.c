@@ -49,13 +49,14 @@ static int32_t  timer_a_counter;  /* cycles until next Timer A overflow */
 static int32_t  timer_b_counter;  /* cycles until next Timer B overflow */
 static uint8_t  ym_status;        /* status register 0 (bit0=TimerA, bit1=TimerB) */
 static uint8_t  ym_adpcm_status;  /* status register 1 (bit7=ADPCM-B EOS, bits0-5=ADPCM-A end) */
+static uint8_t  timer_irq_ena;    /* bits: 0=Timer A IRQ, 1=Timer B IRQ */
 
 #define TIMER_A_PERIOD(v)  (36 * (1024 - (v)))
 #define TIMER_B_PERIOD(v)  (576 * (256 - (v)))
 
 static void timers_advance(int cycles)
 {
-	if (timer_ctrl & 0x01) { /* Timer A enabled */
+	if (timer_ctrl & 0x01) { /* Timer A running */
 		timer_a_counter -= cycles;
 		if (timer_a_counter <= 0) {
 			ym_status |= 0x01;
@@ -63,9 +64,11 @@ static void timers_advance(int cycles)
 			if (period <= 0) period = 1;
 			while (timer_a_counter <= 0)
 				timer_a_counter += period;
+			if (timer_irq_ena & 0x01)
+				Cz80_Set_IRQ(&z80_cpu, 0, ASSERT_LINE);
 		}
 	}
-	if (timer_ctrl & 0x02) { /* Timer B enabled */
+	if (timer_ctrl & 0x02) { /* Timer B running */
 		timer_b_counter -= cycles;
 		if (timer_b_counter <= 0) {
 			ym_status |= 0x02;
@@ -73,6 +76,8 @@ static void timers_advance(int cycles)
 			if (period <= 0) period = 1;
 			while (timer_b_counter <= 0)
 				timer_b_counter += period;
+			if (timer_irq_ena & 0x02)
+				Cz80_Set_IRQ(&z80_cpu, 0, ASSERT_LINE);
 		}
 	}
 }
@@ -261,11 +266,8 @@ static UINT8 z80_port_read(UINT16 port)
 		return cmd_latch;
 	case 0x04: /* YM2610 status port 1 (timer flags + busy) */
 		return ym_status;
-	case 0x06: { /* YM2610 status port 2 (ADPCM flags) — read-and-clear */
-		uint8_t ret = ym_adpcm_status;
-		ym_adpcm_status = 0;
-		return ret;
-	}
+	case 0x06: /* YM2610 status port 2 (ADPCM flags) */
+		return ym_adpcm_status;
 	default:
 		return 0xFF;
 	}
@@ -567,21 +569,34 @@ static void ym2610_write_reg1(uint8_t addr, uint8_t val)
 		return;
 	}
 	if (addr == 0x27) {
-		/* Timer control: bits 0-1 = enable A/B, bits 2-3 = load A/B,
-		 * bits 4-5 = reset overflow flag A/B */
-		if (val & 0x10) ym_status &= ~0x01; /* reset Timer A flag */
-		if (val & 0x20) ym_status &= ~0x02; /* reset Timer B flag */
-		if (val & 0x04) { /* load Timer A */
+		/* Register $27 — Timer/mode control (from MAME OPN):
+		 * bit 0: Load/run Timer A
+		 * bit 1: Load/run Timer B
+		 * bit 2: IRQ enable Timer A
+		 * bit 3: IRQ enable Timer B
+		 * bit 4: Reset Timer A overflow flag
+		 * bit 5: Reset Timer B overflow flag */
+		if (val & 0x10) {
+			ym_status &= ~0x01;
+			Cz80_Set_IRQ(&z80_cpu, 0, CLEAR_LINE);
+		}
+		if (val & 0x20) {
+			ym_status &= ~0x02;
+			Cz80_Set_IRQ(&z80_cpu, 0, CLEAR_LINE);
+		}
+		/* Load/run timers */
+		if ((val & 0x01) && !(timer_ctrl & 0x01)) {
 			int period = TIMER_A_PERIOD(timer_a_val);
 			if (period <= 0) period = 1;
 			timer_a_counter = period;
 		}
-		if (val & 0x08) { /* load Timer B */
+		if ((val & 0x02) && !(timer_ctrl & 0x02)) {
 			int period = TIMER_B_PERIOD(timer_b_val);
 			if (period <= 0) period = 1;
 			timer_b_counter = period;
 		}
 		timer_ctrl = val & 0x03;
+		timer_irq_ena = (val >> 2) & 0x03;
 		return;
 	}
 
@@ -613,6 +628,14 @@ static void ym2610_write_reg2(uint8_t addr, uint8_t val)
 	/* TODO: $08-$0F ADPCM-A per-channel params, $10-$1F volumes */
 }
 
+/* Z80 IRQ acknowledge callback — clear the IRQ line */
+static INT32 z80_irq_callback(INT32 irqline)
+{
+	(void)irqline;
+	Cz80_Set_IRQ(&z80_cpu, 0, CLEAR_LINE);
+	return 0xFF; /* IM 1 vector (RST $38) */
+}
+
 /* ---- Public API ---- */
 
 void sound_init(const uint8_t *rom, int rom_size)
@@ -628,7 +651,8 @@ void sound_init(const uint8_t *rom, int rom_size)
 	timer_a_counter = 0;
 	timer_b_counter = 0;
 	ym_status = 0;
-	ym_adpcm_status = 0xBF; /* ADPCM-A all ended + ADPCM-B EOS; read-and-clear */
+	ym_adpcm_status = 0x00; /* no ADPCM flags on power-up */
+	timer_irq_ena = 0;
 	stat_p04_nvals = 0;
 	port_trace_n = 0;
 	memset(stat_port_rhist, 0, sizeof(stat_port_rhist));
@@ -667,6 +691,7 @@ void sound_init(const uint8_t *rom, int rom_size)
 	Cz80_Set_WriteB(&z80_cpu, z80_write);
 	Cz80_Set_INPort(&z80_cpu, z80_port_read);
 	Cz80_Set_OUTPort(&z80_cpu, z80_port_write);
+	Cz80_Set_IRQ_Callback(&z80_cpu, z80_irq_callback);
 
 	Cz80_Reset(&z80_cpu);
 
