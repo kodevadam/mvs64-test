@@ -720,9 +720,18 @@ void sound_update(int cycles)
 		timer_ctrl = 0x01;  /* Timer A running */
 		timer_irq_ena = 0x01; /* Timer A IRQ enabled */
 		timer_a_counter = TIMER_A_PERIOD(914);
+		/* Also enable Z80 interrupts — the EI instruction is in the
+		 * unreached init code past $0103. Without this, the Z80
+		 * ignores Timer A IRQ because IFF1=0. */
+		Cz80_Set_Reg(&z80_cpu, CZ80_IFF1, 1);
+		Cz80_Set_Reg(&z80_cpu, CZ80_IFF2, 1);
+		/* Set init variables that the unreached code at $00EA would have set */
+		z80_ram[0x062C] = 0xFF; /* $FE2C — $F800 base + offset */
+		z80_ram[0x0630] = 0xFF; /* $FE30 */
+		z80_ram[0x0631] = 0xFF; /* $FE31 */
+		z80_ram[0x0625] = 0x03; /* $FE25 */
 #ifdef N64
-		debugf("[SND] HACK: force-enabled Timer A (val=%d period=%ld)\n",
-			timer_a_val, (long)timer_a_counter);
+		debugf("[SND] HACK: force-enabled Timer A + EI + init vars\n");
 #endif
 	}
 
