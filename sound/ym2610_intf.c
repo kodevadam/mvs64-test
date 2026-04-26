@@ -185,30 +185,18 @@ void sound_debug_stats(void)
 	static int rom_dumped = 0;
 	if (!rom_dumped && z80_has_rom) {
 		rom_dumped = 1;
-		/* Find ALL ED-prefixed OUT (C),r instructions (ED 41/49/51/59/61/69/79) */
-		debugf("[SND] ED OUT(C) at:");
-		for (int i = 0; i < Z80_ROM_SIZE - 1; i++) {
-			if (z80_rom[i] == 0xED) {
-				uint8_t op = z80_rom[i+1];
-				if (op == 0x41 || op == 0x49 || op == 0x51 || op == 0x59 ||
-				    op == 0x61 || op == 0x69 || op == 0x79 || op == 0xA3 || op == 0xAB)
-					debugf(" %04x:%02x", i, op);
-			}
+		/* Dump the three init subroutines that may be stuck */
+		int addrs[] = {0x09D8, 0x0A0A, 0x09F1, 0x01BD, 0x1EDA};
+		const char *names[] = {"$09D8", "$0A0A", "$09F1", "$01BD", "$1EDA"};
+		for (int a = 0; a < 5; a++) {
+			debugf("[SND] ROM@%s:", names[a]);
+			for (int i = addrs[a]; i < addrs[a] + 48 && i < Z80_ROM_SIZE; i++)
+				debugf(" %02x", z80_rom[i]);
+			debugf("\n");
 		}
-		debugf("\n");
-		/* Dump init code at $00D0 (64 bytes) */
-		debugf("[SND] ROM@00d0:");
-		for (int i = 0xD0; i < 0x110 && i < Z80_ROM_SIZE; i++)
-			debugf(" %02x", z80_rom[i]);
-		debugf("\n");
-		/* Dump RST $38 handler (Timer A ISR vector, 32 bytes) */
-		debugf("[SND] ROM@0038:");
-		for (int i = 0x38; i < 0x58 && i < Z80_ROM_SIZE; i++)
-			debugf(" %02x", z80_rom[i]);
-		debugf("\n");
-		/* Dump NMI handler at $0066 (32 bytes) */
-		debugf("[SND] ROM@0066:");
-		for (int i = 0x66; i < 0x86 && i < Z80_ROM_SIZE; i++)
+		/* Also dump init continuation at $0110 */
+		debugf("[SND] ROM@0110:");
+		for (int i = 0x0110; i < 0x0150 && i < Z80_ROM_SIZE; i++)
 			debugf(" %02x", z80_rom[i]);
 		debugf("\n");
 	}
@@ -710,30 +698,6 @@ void sound_update(int cycles)
 	if (!z80_has_rom) return;  /* no sound driver loaded — skip */
 
 	stat_update_calls++;
-
-	/* HACK: force-enable Timer A if the init didn't set it up.
-	 * The Z80 init enters the main loop before reaching the timer
-	 * setup code at $010A+. Give it 10 frames to settle, then
-	 * force Timer A with a ~250 Hz tick (standard NeoGeo tempo). */
-	if (stat_update_calls == 10 && timer_ctrl == 0) {
-		timer_a_val = 914;  /* 36 * (1024-914) = 3960 cycles ≈ 990 us ≈ 1010 Hz */
-		timer_ctrl = 0x01;  /* Timer A running */
-		timer_irq_ena = 0x01; /* Timer A IRQ enabled */
-		timer_a_counter = TIMER_A_PERIOD(914);
-		/* Also enable Z80 interrupts — the EI instruction is in the
-		 * unreached init code past $0103. Without this, the Z80
-		 * ignores Timer A IRQ because IFF1=0. */
-		Cz80_Set_Reg(&z80_cpu, CZ80_IFF1, 1);
-		Cz80_Set_Reg(&z80_cpu, CZ80_IFF2, 1);
-		/* Set init variables that the unreached code at $00EA would have set */
-		z80_ram[0x062C] = 0xFF; /* $FE2C — $F800 base + offset */
-		z80_ram[0x0630] = 0xFF; /* $FE30 */
-		z80_ram[0x0631] = 0xFF; /* $FE31 */
-		z80_ram[0x0625] = 0x03; /* $FE25 */
-#ifdef N64
-		debugf("[SND] HACK: force-enabled Timer A + EI + init vars\n");
-#endif
-	}
 
 	if (nmi_pending) {
 		Cz80_Set_IRQ(&z80_cpu, IRQ_LINE_NMI, HOLD_LINE);
