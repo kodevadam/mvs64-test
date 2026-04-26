@@ -721,8 +721,8 @@ void sound_update(int cycles)
 		timer_irq_ena = 0x01; /* Timer A IRQ enabled */
 		timer_a_counter = TIMER_A_PERIOD(914);
 #ifdef N64
-		debugf("[SND] HACK: force-enabled Timer A (val=%d period=%d)\n",
-			timer_a_val, timer_a_counter);
+		debugf("[SND] HACK: force-enabled Timer A (val=%d period=%ld)\n",
+			timer_a_val, (long)timer_a_counter);
 #endif
 	}
 
