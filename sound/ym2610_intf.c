@@ -710,6 +710,22 @@ void sound_update(int cycles)
 	if (!z80_has_rom) return;  /* no sound driver loaded — skip */
 
 	stat_update_calls++;
+
+	/* HACK: force-enable Timer A if the init didn't set it up.
+	 * The Z80 init enters the main loop before reaching the timer
+	 * setup code at $010A+. Give it 10 frames to settle, then
+	 * force Timer A with a ~250 Hz tick (standard NeoGeo tempo). */
+	if (stat_update_calls == 10 && timer_ctrl == 0) {
+		timer_a_val = 914;  /* 36 * (1024-914) = 3960 cycles ≈ 990 us ≈ 1010 Hz */
+		timer_ctrl = 0x01;  /* Timer A running */
+		timer_irq_ena = 0x01; /* Timer A IRQ enabled */
+		timer_a_counter = TIMER_A_PERIOD(914);
+#ifdef N64
+		debugf("[SND] HACK: force-enabled Timer A (val=%d period=%d)\n",
+			timer_a_val, timer_a_counter);
+#endif
+	}
+
 	if (nmi_pending) {
 		Cz80_Set_IRQ(&z80_cpu, IRQ_LINE_NMI, HOLD_LINE);
 		nmi_pending = 0;
